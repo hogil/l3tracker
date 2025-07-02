@@ -1,0 +1,75 @@
+# 데이터 파일들
+data/
+*.mat
+*.csv
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.npy
+
+# 임시 파일들
+temp_cleanup/
+*.bak
+*.20250623_*
+*.onetoc2
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 모델 파일들
+*.pth
+*.ckpt
+*.pkl
+pre_trained/
+logs/
+
+# 결과 파일들
+samples/
+plots/
+metrics/
+confusion_matrices/
+output_images/
+output_wm/
+fft_images/
+thumbnails/
+classified/
+misclassified/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+
+# 불필요한 파일들
+*.txt~
+*.pdf
+*.docx
+*.pptx
+
+# 특정 파일들
+server.py
+test.py
+main.py
+*.bak 
