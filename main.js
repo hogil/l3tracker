@@ -341,6 +341,15 @@ class WaferMapViewer {
                 if (this.gridMode) return; // grid 모드에서는 팬(이동) 비활성화
                 this.handleMouseDown(e);
             });
+        // 싱글 이미지 모드에서 우클릭 시 원본 파일을 바로 저장
+        if (this.dom.viewerContainer)
+            this.dom.viewerContainer.addEventListener('contextmenu', e => {
+                if (this.gridMode) return; // 그리드 모드에서는 기존 컨텍스트 사용
+                if (this.selectedImagePath) {
+                    e.preventDefault();
+                    this.downloadImage(this.selectedImagePath);
+                }
+            });
         if (this.dom.viewerContainer)
             new ResizeObserver(() => this.handleResize()).observe(this.dom.viewerContainer);
     }
@@ -1280,14 +1289,30 @@ class WaferMapViewer {
             selectedImagePaths.forEach((imagePath, index) => {
                 setTimeout(() => {
                     this.downloadImage(imagePath);
-                }, index * 300); // 300ms 간격으로 다운로드
+                }, index * 150); // 더 빠르게
             });
 
-            alert(`${selectedImagePaths.length}개 파일 다운로드를 시작합니다.`);
+            // 진행 안내는 방해 없이 토스트로 간단히 표시
+            this.showToast(`${selectedImagePaths.length}개 파일 다운로드 시작`, 1800);
         } catch (error) {
             console.error('선택된 이미지 다운로드 실패:', error);
             alert('선택된 이미지 다운로드에 실패했습니다.');
         }
+    }
+
+    // 심플 토스트
+    showToast(message, duration = 1500) {
+        try {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            toast.style.cssText = `
+                position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                background: rgba(0,0,0,0.85); color: #fff; padding: 8px 14px;
+                border-radius: 6px; z-index: 10000; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), duration);
+        } catch {}
     }
 
     showContextMenu(event, clickedIdx) {
