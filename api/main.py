@@ -577,6 +577,34 @@ async def get_image(path: str):
         return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
 
 # =====================
+# 전역 파일 인덱스/검색 엔드포인트
+# =====================
+@app.get("/api/files/all")
+async def get_all_image_files():
+    """루트 이하의 모든 이미지 파일 경로(상대경로, POSIX)를 반환합니다.
+    - 'classification', 'thumbnails' 디렉토리는 제외
+    - 지원 이미지 확장자만 포함
+    """
+    try:
+        excluded_dirs = {"classification", "thumbnails", "__pycache__"}
+        files: List[str] = []
+        for p in ROOT_DIR.rglob("*"):
+            if not p.is_file():
+                continue
+            if not is_supported_image(p):
+                continue
+            # 제외 디렉토리 필터
+            rel = p.relative_to(ROOT_DIR)
+            parts = set(part.lower() for part in rel.parts[:-1])
+            if excluded_dirs & parts:
+                continue
+            files.append(rel.as_posix())
+        return {"success": True, "files": files}
+    except Exception as e:
+        logging.error(f"전체 파일 인덱스 생성 중 오류: {e}")
+        return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+# =====================
 # 분류 관련 엔드포인트
 # =====================
 @app.get("/api/classes")

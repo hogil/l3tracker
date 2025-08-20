@@ -299,6 +299,10 @@ class WaferMapViewer {
         this.gridCols = DEFAULT_GRID_COLS;
         this.gridThumbSize = DEFAULT_THUMB_SIZE;
 
+        // 전역 파일 인덱스 (폴더를 열지 않아도 검색 가능)
+        this.allFilesIndex = null; // string[] (ROOT 기준 상대경로, posix)
+        this.allFilesIndexLoaded = false;
+
         // 클래스 선택 상태 초기화 (Label Explorer와 Class Manager가 공유)
         this.classSelection = { selected: [], lastClicked: null };
         this.labelSelection = { selected: [], lastClicked: null, openFolders: {}, selectedClasses: [] };
@@ -894,11 +898,32 @@ class WaferMapViewer {
         
         // 초기 실행 시 안내 메시지 표시
         this.showInitialState();
+
+        // 전역 파일 인덱스 비동기 로드 (폴더 오픈 없이 검색 가능하도록)
+        this.loadAllFilesIndex();
     }
 
     // =====================
     // 파일 탐색기/그리드/이미지 로딩/뷰어/라벨링 등 주요 함수
     // =====================
+    async loadAllFilesIndex() {
+        try {
+            const res = await fetch('/api/files/all');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (data && data.success && Array.isArray(data.files)) {
+                this.allFilesIndex = data.files;
+                this.allFilesIndexLoaded = true;
+                // 콘솔 로그로 파일 수만 표시 (과도한 로그 방지)
+                console.log(`전역 파일 인덱스 로드 완료: ${this.allFilesIndex.length}개`);
+            } else {
+                console.warn('전역 파일 인덱스 응답 형식이 올바르지 않음');
+            }
+        } catch (error) {
+            console.warn('전역 파일 인덱스 로드 실패:', error);
+            this.allFilesIndexLoaded = false;
+        }
+    }
     async loadDirectoryContents(path, containerElement) {
         console.log("[DEBUG] loadDirectoryContents called with path:", path);
         try {
@@ -1024,8 +1049,18 @@ class WaferMapViewer {
             console.log(`파일명 검색 시작: "${fileQuery}"`);
             const startTime = performance.now();
             
-            // 빠른 파일명 검색 - 현재 로드된 파일들만 검색
-            const matchedImages = this.fastFileNameSearch(fileQuery);
+            let matchedImages = [];
+            if (this.allFilesIndexLoaded && Array.isArray(this.allFilesIndex)) {
+                // 전역 인덱스 기반 검색 (폴더 미오픈 상태에서도 검색 가능)
+                const q = fileQuery.toLowerCase();
+                matchedImages = this.allFilesIndex.filter(p => {
+                    const name = p.split('/').pop().toLowerCase();
+                    return this.matchesSearchQuery(name, q);
+                });
+            } else {
+                // 폴더 UI에 로드된 DOM 기반 빠른 검색 (폴백)
+                matchedImages = this.fastFileNameSearch(fileQuery);
+            }
             
             const endTime = performance.now();
             console.log(`검색 완료: ${matchedImages.length}개 이미지 발견 (${(endTime - startTime).toFixed(1)}ms)`);
