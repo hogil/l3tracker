@@ -1509,30 +1509,19 @@ class WaferMapViewer {
     }
 
     async ensureClipboardPermission() {
-        try {
-            // 이미 권한이 있으면 true 반환
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                return true;
-            }
-            
-            // 권한 API를 사용한 요청
-            if (navigator.permissions && navigator.permissions.query) {
-                const result = await navigator.permissions.query({ name: 'clipboard-write' });
-                
-                if (result.state === 'granted') {
-                    return true;
-                } else if (result.state === 'prompt') {
-                    // 권한 요청 다이얼로그 표시
-                    const permission = await navigator.permissions.request({ name: 'clipboard-write' });
-                    return permission.state === 'granted';
-                }
-            }
-            
-            return false;
-        } catch (error) {
-            console.warn('클립보드 권한 확인 실패:', error);
-            return false;
+        // 이미 권한이 있으면 true 반환
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return true;
         }
+        
+        // 권한 요청 시도
+        const hasPermission = await this.requestClipboardPermission();
+        if (hasPermission) {
+            // 권한 획득 후 클립보드 API 재시도
+            return navigator.clipboard && navigator.clipboard.writeText;
+        }
+        
+        return false;
     }
 
     async copyFileListAsTable() {
@@ -4256,193 +4245,9 @@ window.addEventListener('wheel', function(e) {
 }, { passive: false });
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { 
-        window.viewer = new WaferMapViewer(); 
-        // 클립보드 권한 요청 UI 표시
-        showClipboardPermissionRequest();
-    });
+    document.addEventListener('DOMContentLoaded', () => { window.viewer = new WaferMapViewer(); });
 } else {
     window.viewer = new WaferMapViewer();
-    // 클립보드 권한 요청 UI 표시
-    showClipboardPermissionRequest();
-}
-
-// 클립보드 권한 요청 UI 표시
-function showClipboardPermissionRequest() {
-    // 이미 권한이 있으면 표시하지 않음
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        return;
-    }
-    
-    // 권한 요청 배너 생성
-    const banner = document.createElement('div');
-    banner.id = 'clipboard-permission-banner';
-    banner.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 15px 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        z-index: 10000;
-        max-width: 300px;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    `;
-    
-    banner.innerHTML = `
-        <div style="margin-bottom: 10px; font-weight: bold;">📋 클립보드 권한 필요</div>
-        <div style="margin-bottom: 15px; font-size: 14px;">
-            이미지 합치기와 파일 정보 복사 기능을 사용하려면 클립보드 권한이 필요합니다.
-        </div>
-        <button id="request-clipboard-permission" style="
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-right: 10px;
-        ">권한 요청</button>
-        <button id="dismiss-clipboard-banner" style="
-            background: #f44336;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-        ">닫기</button>
-    `;
-    
-    document.body.appendChild(banner);
-    
-    // 권한 요청 버튼 이벤트
-    document.getElementById('request-clipboard-permission').addEventListener('click', async () => {
-        try {
-            // 직접 클립보드 API 테스트로 권한 요청
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                // 간단한 텍스트로 권한 테스트
-                await navigator.clipboard.writeText('권한 테스트');
-                
-                // 성공 시 배너 업데이트
-                banner.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-                banner.innerHTML = `
-                    <div style="margin-bottom: 10px; font-weight: bold;">✅ 권한 획득 완료!</div>
-                    <div style="margin-bottom: 15px; font-size: 14px;">
-                        이제 클립보드 복사 기능을 사용할 수 있습니다.
-                    </div>
-                    <button onclick="this.parentElement.parentElement.remove()" style="
-                        background: #2196F3;
-                        color: white;
-                        border: none;
-                        padding: 8px 16px;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        font-size: 14px;
-                    ">확인</button>
-                `;
-                
-                // 3초 후 자동 제거
-                setTimeout(() => {
-                    if (banner.parentElement) {
-                        banner.remove();
-                    }
-                }, 3000);
-                
-            } else if (navigator.permissions && navigator.permissions.query) {
-                // 권한 API를 사용한 요청
-                const result = await navigator.permissions.query({ name: 'clipboard-write' });
-                
-                if (result.state === 'granted') {
-                    // 이미 권한이 있는 경우
-                    banner.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-                    banner.innerHTML = `
-                        <div style="margin-bottom: 10px; font-weight: bold;">✅ 권한 확인됨!</div>
-                        <div style="margin-bottom: 15px; font-size: 14px;">
-                            클립보드 권한이 이미 허용되어 있습니다.
-                        </div>
-                        <button onclick="this.parentElement.parentElement.remove()" style="
-                            background: #2196F3;
-                            color: white;
-                            border: none;
-                            padding: 8px 16px;
-                            border-radius: 5px;
-                            cursor: pointer;
-                            font-size: 14px;
-                        ">확인</button>
-                    `;
-                    
-                    setTimeout(() => {
-                        if (banner.parentElement) {
-                            banner.remove();
-                        }
-                    }, 3000);
-                    
-                } else if (result.state === 'prompt') {
-                    // 권한 요청 다이얼로그 표시
-                    const permission = await navigator.permissions.request({ name: 'clipboard-write' });
-                    
-                    if (permission.state === 'granted') {
-                        banner.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
-                        banner.innerHTML = `
-                            <div style="margin-bottom: 10px; font-weight: bold;">✅ 권한 획득 완료!</div>
-                            <div style="margin-bottom: 15px; font-size: 14px;">
-                                클립보드 권한이 허용되었습니다.
-                            </div>
-                            <button onclick="this.parentElement.parentElement.remove()" style="
-                                background: #2196F3;
-                                color: white;
-                                border: none;
-                                padding: 8px 16px;
-                                border-radius: 5px;
-                                cursor: pointer;
-                                font-size: 14px;
-                            ">확인</button>
-                        `;
-                        
-                        setTimeout(() => {
-                            if (banner.parentElement) {
-                                banner.remove();
-                            }
-                        }, 3000);
-                    } else {
-                        alert('클립보드 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.');
-                    }
-                } else {
-                    alert('클립보드 권한이 거부되어 있습니다. 브라우저 설정에서 권한을 허용해주세요.');
-                }
-            } else {
-                // 권한 API를 지원하지 않는 경우
-                alert('이 브라우저는 클립보드 권한을 지원하지 않습니다. 최신 브라우저를 사용해주세요.');
-            }
-        } catch (error) {
-            console.error('권한 요청 실패:', error);
-            
-            // 오류 메시지에 따라 다른 안내
-            if (error.name === 'NotAllowedError') {
-                alert('클립보드 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.');
-            } else if (error.name === 'NotSupportedError') {
-                alert('이 브라우저는 클립보드 API를 지원하지 않습니다.');
-            } else {
-                alert('권한 요청에 실패했습니다. 브라우저 설정에서 클립보드 권한을 확인해주세요.');
-            }
-        }
-    });
-    
-    // 닫기 버튼 이벤트
-    document.getElementById('dismiss-clipboard-banner').addEventListener('click', () => {
-        banner.remove();
-    });
-    
-    // 10초 후 자동으로 배경색 변경 (덜 강조)
-    setTimeout(() => {
-        if (banner.parentElement) {
-            banner.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
-        }
-    }, 10000);
 }
 
 async function fetchJson(url, options = {}) {
