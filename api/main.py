@@ -335,18 +335,14 @@ async def record_user_activity(request, call_next):
 # =====================
 @app.on_event("startup")
 async def startup_event():
-    """서버 시작 시 백그라운드 썸네일 시스템 시작"""
-    logging.info("서버 시작 - 백그라운드 썸네일 시스템 초기화")
+    """서버 시작 시 기본 시스템만 초기화"""
+    logging.info("서버 시작 - 기본 시스템 초기화")
     
-    # 손상된 썸네일 정리
-    cleaned_count = background_thumbnail_manager.cleanup_corrupted_thumbnails()
-    if cleaned_count > 0:
-        logging.info(f"시작 시 {cleaned_count}개 손상된 썸네일 정리 완료")
+    # 전역 이미지 인덱스 빌드 비활성화 (서버 시작 속도 우선)
+    # build_image_index()
     
-    # 전역 이미지 인덱스 빌드 (비동기 아님 - 최초 1회)
-    build_image_index()
-
-    await background_thumbnail_manager.start()
+    # 백그라운드 썸네일 시스템은 비활성화 (안정성 우선)
+    # await background_thumbnail_manager.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
