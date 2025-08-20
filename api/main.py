@@ -54,6 +54,39 @@ def build_image_index() -> int:
         logging.error(f"전역 이미지 인덱스 구축 실패: {e}")
         return 0
 
+async def build_image_index_async():
+    """비동기로 이미지 인덱스를 구축합니다."""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, build_image_index)
+    except Exception as e:
+        logging.error(f"비동기 인덱스 구축 실패: {e}")
+
+async def fast_search_fallback(query: str):
+    """빠른 폴백 검색 (인덱스 없이 현재 열린 폴더에서만)"""
+    try:
+        # 간단한 검색으로 빠른 응답
+        results = []
+        # 현재 열린 폴더들에서만 검색 (전체 스캔 방지)
+        for root, dirs, files in os.walk(str(ROOT_DIR)):
+            # classification, thumbnails 폴더 제외
+            if "classification" in root or "thumbnails" in root:
+                continue
+            for file in files:
+                if is_supported_image(Path(root) / file):
+                    if query.lower() in file.lower():
+                        rel_path = Path(root).relative_to(ROOT_DIR) / file
+                        results.append(str(rel_path))
+                    # 너무 많은 결과 방지
+                    if len(results) >= 100:
+                        break
+            if len(results) >= 100:
+                break
+        return {"success": True, "results": results}
+    except Exception as e:
+        logging.error(f"빠른 검색 실패: {e}")
+        return {"success": True, "results": []}
+
 # =====================
 # 백그라운드 썸네일 생성 시스템
 # =====================
@@ -619,8 +652,17 @@ async def get_files(path: Optional[str] = None):
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
         
+        # 빠른 파일 목록 조회 (정렬 최적화)
+        try:
+            entries = list(target.iterdir())
+            # 빠른 정렬 (디렉토리 우선, 이름순)
+            entries.sort(key=lambda x: (not x.is_dir(), x.name.lower()))
+        except Exception:
+            # 정렬 실패 시 기본 순서
+            entries = list(target.iterdir())
+        
         items = []
-        for entry in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        for entry in entries:
             if entry.name.startswith('.') or entry.name == '__pycache__':
                 continue
             # classification, thumbnails 폴더는 파일 탐색기에서 숨기기
@@ -707,12 +749,18 @@ async def search_files(q: str):
                     return True
             return False
 
-        # 전역 인덱스가 비어 있으면 재구축
+        # 전역 인덱스가 비어 있으면 지연 로딩으로 구축
         if not ALL_IMAGE_PATHS:
-            build_image_index()
+            try:
+                # 백그라운드에서 인덱스 구축 (사용자 응답 지연 방지)
+                asyncio.create_task(build_image_index_async())
+                # 임시로 빠른 검색 수행
+                return await fast_search_fallback(query)
+            except Exception as e:
+                logging.error(f"인덱스 구축 중 오류: {e}")
+                return {"success": True, "results": []}
 
         results: List[str] = []
-        qlower = query
         for p in ALL_IMAGE_PATHS:
             name = p.split('/')[-1].lower()
             if matches(name):
