@@ -120,18 +120,33 @@ class BackgroundThumbnailManager:
     async def _scan_and_generate(self):
         """이미지 스캔하고 썸네일 생성"""
         try:
+            # 시작 직전에도 사용자 활동 감지 시 즉시 종료
+            if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                logging.info("사용자 요청 감지 - 스캔 시작 취소")
+                return
             self.scan_count += 1
             start_time = asyncio.get_event_loop().time()
             
             # 모든 이미지 파일 찾기
             all_images = []
-            for img_path in ROOT_DIR.rglob("*"):
+            for idx, img_path in enumerate(ROOT_DIR.rglob("*")):
+                # 긴 루프에서 주기적으로 양보 및 사용자 활동 체크
+                if idx % 500 == 0:
+                    if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                        logging.info("사용자 요청 감지 - 스캔(파일열거) 중단")
+                        return
+                    await asyncio.sleep(0)
                 if img_path.is_file() and is_supported_image(img_path):
                     all_images.append(img_path)
                     
             # 썸네일이 없는 이미지들 필터링
             missing_thumbnails = []
-            for img_path in all_images:
+            for jdx, img_path in enumerate(all_images):
+                if jdx % 500 == 0:
+                    if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                        logging.info("사용자 요청 감지 - 스캔(미싱필터) 중단")
+                        return
+                    await asyncio.sleep(0)
                 thumb_path = get_thumbnail_path(img_path)
                 if not thumb_path.exists():
                     missing_thumbnails.append(img_path)
@@ -148,6 +163,11 @@ class BackgroundThumbnailManager:
                 if not self.is_running:
                     break
                     
+                # 사용자 요청 즉시 중단
+                if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                    logging.info("사용자 요청 감지 - 썸네일 배치 시작 전 중단")
+                    break
+
                 batch = missing_thumbnails[i:i + self.batch_size]
                 
                 # 백그라운드에서 배치 처리
@@ -175,7 +195,7 @@ class BackgroundThumbnailManager:
                     break
                 
                 # CPU 양보 (사용자 액션 우선)
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)
                 
                 # 진행상황 로그
                 if (i + self.batch_size) % 200 == 0:
