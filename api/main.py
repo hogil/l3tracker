@@ -189,12 +189,28 @@ class BackgroundThumbnailManager:
                 paste_y = (target_h - new_h) // 2
                 thumbnail.paste(img_resized, (paste_x, paste_y))
                 
-                thumbnail.save(thumb_path, THUMBNAIL_FORMAT, quality=THUMBNAIL_QUALITY, method=4)
+                # 임시 파일에 먼저 저장하여 오류 확인
+                temp_path = thumb_path.with_suffix('.tmp')
+                thumbnail.save(temp_path, THUMBNAIL_FORMAT, quality=THUMBNAIL_QUALITY, method=4)
+                
+                # 파일 크기 확인 (0바이트 방지)
+                if temp_path.stat().st_size > 0:
+                    # 성공적으로 저장된 경우에만 최종 위치로 이동
+                    temp_path.rename(thumb_path)
+                    return True
+                else:
+                    # 0바이트 파일인 경우 삭제
+                    temp_path.unlink(missing_ok=True)
+                    logging.warning(f"0바이트 썸네일 생성됨: {img_path}")
+                    return False
                 
             return True
             
         except Exception as e:
             logging.warning(f"백그라운드 썸네일 생성 실패 {img_path}: {e}")
+            # 오류 발생 시 임시 파일 정리
+            temp_path = get_thumbnail_path(img_path).with_suffix('.tmp')
+            temp_path.unlink(missing_ok=True)
             return False
             
     def get_stats(self) -> dict:
@@ -207,6 +223,29 @@ class BackgroundThumbnailManager:
             "last_scan_duration": round(self.last_scan_time, 2),
             "background_workers": self.background_executor._max_workers
         }
+    
+    def cleanup_corrupted_thumbnails(self) -> int:
+        """손상된 썸네일 파일들을 정리합니다"""
+        cleaned_count = 0
+        try:
+            thumb_dir = Path(ROOT_DIR) / "thumbnails"
+            if not thumb_dir.exists():
+                return 0
+                
+            for thumb_file in thumb_dir.rglob("*.webp"):
+                try:
+                    # 0바이트 파일 또는 손상된 파일 확인
+                    if thumb_file.stat().st_size == 0:
+                        thumb_file.unlink()
+                        cleaned_count += 1
+                        logging.info(f"손상된 썸네일 삭제: {thumb_file}")
+                except Exception as e:
+                    logging.warning(f"썸네일 정리 중 오류: {thumb_file} - {e}")
+                    
+        except Exception as e:
+            logging.error(f"썸네일 정리 중 오류: {e}")
+            
+        return cleaned_count
 
 # 전역 백그라운드 매니저
 background_thumbnail_manager = BackgroundThumbnailManager()
@@ -225,6 +264,12 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 async def startup_event():
     """서버 시작 시 백그라운드 썸네일 시스템 시작"""
     logging.info("서버 시작 - 백그라운드 썸네일 시스템 초기화")
+    
+    # 손상된 썸네일 정리
+    cleaned_count = background_thumbnail_manager.cleanup_corrupted_thumbnails()
+    if cleaned_count > 0:
+        logging.info(f"시작 시 {cleaned_count}개 손상된 썸네일 정리 완료")
+    
     await background_thumbnail_manager.start()
 
 @app.on_event("shutdown")

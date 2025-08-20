@@ -1337,9 +1337,26 @@ class WaferMapViewer {
             }
 
             const selectedCount = this.gridSelectedIdxs.length;
-            const gridSize = Math.ceil(Math.sqrt(selectedCount));
             
-            alert(`${selectedCount}개 이미지를 ${gridSize}x${gridSize} 그리드로 합치는 중...`);
+            // 개수에 따라 적절한 그리드 크기 계산
+            let cols, rows;
+            if (selectedCount <= 4) {
+                cols = 2; rows = 2;
+            } else if (selectedCount <= 9) {
+                cols = 3; rows = 3;
+            } else if (selectedCount <= 16) {
+                cols = 4; rows = 4;
+            } else if (selectedCount <= 25) {
+                cols = 5; rows = 5;
+            } else if (selectedCount <= 36) {
+                cols = 6; rows = 6;
+            } else {
+                // 36개 초과시 스크롤 가능한 그리드
+                cols = 6;
+                rows = Math.ceil(selectedCount / cols);
+            }
+            
+            alert(`${selectedCount}개 이미지를 ${cols}x${rows} 그리드로 합치는 중...`);
 
             // Canvas 생성
             const canvas = document.createElement('canvas');
@@ -1347,8 +1364,8 @@ class WaferMapViewer {
             
             // 각 이미지 크기 (512px로 설정)
             const imageSize = 512;
-            canvas.width = gridSize * imageSize;
-            canvas.height = gridSize * imageSize;
+            canvas.width = cols * imageSize;
+            canvas.height = rows * imageSize;
             
             // 배경을 검은색으로 설정
             ctx.fillStyle = '#000000';
@@ -1362,8 +1379,8 @@ class WaferMapViewer {
                 
                 return new Promise((resolve, reject) => {
                     img.onload = () => {
-                        const row = Math.floor(index / gridSize);
-                        const col = index % gridSize;
+                        const row = Math.floor(index / cols);
+                        const col = index % cols;
                         const x = col * imageSize;
                         const y = row * imageSize;
                         
@@ -1387,12 +1404,30 @@ class WaferMapViewer {
             // Canvas를 Blob으로 변환하고 클립보드에 복사
             canvas.toBlob(async (blob) => {
                 try {
-                    const item = new ClipboardItem({ 'image/png': blob });
-                    await navigator.clipboard.write([item]);
-                    alert(`${selectedCount}개 이미지가 ${gridSize}x${gridSize} 그리드로 합쳐져서 클립보드에 복사되었습니다!`);
+                    // 클립보드 권한 확인 및 요청
+                    const hasPermission = await this.ensureClipboardPermission();
+                    
+                    if (hasPermission && navigator.clipboard && navigator.clipboard.write) {
+                        const item = new ClipboardItem({ 'image/png': blob });
+                        await navigator.clipboard.write([item]);
+                        alert(`${selectedCount}개 이미지가 ${cols}x${rows} 그리드로 합쳐져서 클립보드에 복사되었습니다!`);
+                    } else {
+                        throw new Error('클립보드 권한이 없거나 API를 지원하지 않습니다.');
+                    }
                 } catch (error) {
                     console.error('클립보드 복사 실패:', error);
-                    alert('클립보드 복사에 실패했습니다. 브라우저가 클립보드 API를 지원하지 않을 수 있습니다.');
+                    
+                    // 폴백: 다운로드 링크 생성
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `merged_images_${cols}x${rows}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    alert(`클립보드 복사에 실패했습니다. 대신 이미지가 다운로드되었습니다.`);
                 }
             }, 'image/png');
 
@@ -1402,7 +1437,7 @@ class WaferMapViewer {
         }
     }
 
-    copyFileList() {
+    async copyFileList() {
         try {
             if (!this.gridSelectedIdxs || this.gridSelectedIdxs.length === 0) {
                 alert('복사할 파일을 선택해주세요.');
@@ -1412,31 +1447,84 @@ class WaferMapViewer {
             const selectedFiles = this.gridSelectedIdxs.map(idx => this.selectedImages[idx]).filter(Boolean);
             const fileListText = selectedFiles.join('\n');
 
-            navigator.clipboard.writeText(fileListText).then(() => {
-                alert(`${selectedFiles.length}개 파일 경로가 클립보드에 복사되었습니다!`);
-            }).catch(error => {
-                console.error('클립보드 복사 실패:', error);
-                
-                // 폴백: textarea 사용
-                const textarea = document.createElement('textarea');
-                textarea.value = fileListText;
-                textarea.style.position = 'fixed';
-                textarea.style.opacity = '0';
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                
-                alert(`${selectedFiles.length}개 파일 경로가 클립보드에 복사되었습니다!`);
-            });
-
+            // 클립보드 권한 확인 및 요청
+            const hasPermission = await this.ensureClipboardPermission();
+            
+            if (hasPermission && navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    await navigator.clipboard.writeText(fileListText);
+                    alert(`${selectedFiles.length}개 파일 경로가 클립보드에 복사되었습니다!`);
+                } catch (error) {
+                    console.error('클립보드 복사 실패:', error);
+                    this.fallbackCopyText(fileListText, selectedFiles.length);
+                }
+            } else {
+                // 권한이 없거나 API를 지원하지 않는 경우 폴백 사용
+                this.fallbackCopyText(fileListText, selectedFiles.length);
+            }
         } catch (error) {
             console.error('파일 리스트 복사 실패:', error);
             alert('파일 리스트 복사에 실패했습니다.');
         }
     }
 
-    copyFileListAsTable() {
+    fallbackCopyText(text, count, type = '파일 경로') {
+        try {
+            // 폴백: textarea 사용
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            
+            alert(`${count}개 ${type}가 클립보드에 복사되었습니다!`);
+        } catch (error) {
+            console.error('폴백 복사 실패:', error);
+            alert('클립보드 복사에 실패했습니다. 데이터를 수동으로 복사해주세요.');
+        }
+    }
+
+    async requestClipboardPermission() {
+        try {
+            // 이미 권한이 있는지 확인
+            if (navigator.permissions && navigator.permissions.query) {
+                const result = await navigator.permissions.query({ name: 'clipboard-write' });
+                if (result.state === 'granted') {
+                    return true;
+                } else if (result.state === 'prompt') {
+                    // 권한 요청 다이얼로그 표시
+                    const permission = await navigator.permissions.request({ name: 'clipboard-write' });
+                    return permission.state === 'granted';
+                }
+            }
+            return false;
+        } catch (error) {
+            console.warn('클립보드 권한 확인 실패:', error);
+            return false;
+        }
+    }
+
+    async ensureClipboardPermission() {
+        // 이미 권한이 있으면 true 반환
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return true;
+        }
+        
+        // 권한 요청 시도
+        const hasPermission = await this.requestClipboardPermission();
+        if (hasPermission) {
+            // 권한 획득 후 클립보드 API 재시도
+            return navigator.clipboard && navigator.clipboard.writeText;
+        }
+        
+        return false;
+    }
+
+    async copyFileListAsTable() {
         try {
             if (!this.gridSelectedIdxs || this.gridSelectedIdxs.length === 0) {
                 alert('복사할 파일을 선택해주세요.');
@@ -1477,23 +1565,21 @@ class WaferMapViewer {
                 tableText += values.join('\t') + '\n';
             });
 
-            navigator.clipboard.writeText(tableText).then(() => {
-                alert(`${selectedFiles.length}개 파일의 테이블 데이터가 클립보드에 복사되었습니다!\n(Excel에 붙여넣기 가능)`);
-            }).catch(error => {
-                console.error('클립보드 복사 실패:', error);
-                
-                // 폴백: textarea 사용
-                const textarea = document.createElement('textarea');
-                textarea.value = tableText;
-                textarea.style.position = 'fixed';
-                textarea.style.opacity = '0';
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                
-                alert(`${selectedFiles.length}개 파일의 테이블 데이터가 클립보드에 복사되었습니다!\n(Excel에 붙여넣기 가능)`);
-            });
+            // 클립보드 권한 확인 및 요청
+            const hasPermission = await this.ensureClipboardPermission();
+            
+            if (hasPermission && navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    await navigator.clipboard.writeText(tableText);
+                    alert(`${selectedFiles.length}개 파일의 테이블 데이터가 클립보드에 복사되었습니다!\n(Excel에 붙여넣기 가능)`);
+                } catch (error) {
+                    console.error('클립보드 복사 실패:', error);
+                    this.fallbackCopyText(tableText, selectedFiles.length, '테이블 데이터');
+                }
+            } else {
+                // 권한이 없거나 API를 지원하지 않는 경우 폴백 사용
+                this.fallbackCopyText(tableText, selectedFiles.length, '테이블 데이터');
+            }
 
         } catch (error) {
             console.error('파일 리스트 테이블 복사 실패:', error);
@@ -4159,9 +4245,119 @@ window.addEventListener('wheel', function(e) {
 }, { passive: false });
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { window.viewer = new WaferMapViewer(); });
+    document.addEventListener('DOMContentLoaded', () => { 
+        window.viewer = new WaferMapViewer(); 
+        // 클립보드 권한 요청 UI 표시
+        showClipboardPermissionRequest();
+    });
 } else {
     window.viewer = new WaferMapViewer();
+    // 클립보드 권한 요청 UI 표시
+    showClipboardPermissionRequest();
+}
+
+// 클립보드 권한 요청 UI 표시
+function showClipboardPermissionRequest() {
+    // 이미 권한이 있으면 표시하지 않음
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return;
+    }
+    
+    // 권한 요청 배너 생성
+    const banner = document.createElement('div');
+    banner.id = 'clipboard-permission-banner';
+    banner.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        z-index: 10000;
+        max-width: 300px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    `;
+    
+    banner.innerHTML = `
+        <div style="margin-bottom: 10px; font-weight: bold;">📋 클립보드 권한 필요</div>
+        <div style="margin-bottom: 15px; font-size: 14px;">
+            이미지 합치기와 파일 정보 복사 기능을 사용하려면 클립보드 권한이 필요합니다.
+        </div>
+        <button id="request-clipboard-permission" style="
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        ">권한 요청</button>
+        <button id="dismiss-clipboard-banner" style="
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        ">닫기</button>
+    `;
+    
+    document.body.appendChild(banner);
+    
+    // 권한 요청 버튼 이벤트
+    document.getElementById('request-clipboard-permission').addEventListener('click', async () => {
+        try {
+            if (window.viewer && window.viewer.requestClipboardPermission) {
+                const hasPermission = await window.viewer.requestClipboardPermission();
+                if (hasPermission) {
+                    banner.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                    banner.innerHTML = `
+                        <div style="margin-bottom: 10px; font-weight: bold;">✅ 권한 획득 완료!</div>
+                        <div style="margin-bottom: 15px; font-size: 14px;">
+                            이제 클립보드 복사 기능을 사용할 수 있습니다.
+                        </div>
+                        <button onclick="this.parentElement.parentElement.remove()" style="
+                            background: #2196F3;
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            font-size: 14px;
+                        ">확인</button>
+                    `;
+                    
+                    // 3초 후 자동 제거
+                    setTimeout(() => {
+                        if (banner.parentElement) {
+                            banner.remove();
+                        }
+                    }, 3000);
+                } else {
+                    alert('클립보드 권한을 허용해주세요. 권한이 없으면 일부 기능이 제한됩니다.');
+                }
+            }
+        } catch (error) {
+            console.error('권한 요청 실패:', error);
+            alert('권한 요청에 실패했습니다. 브라우저 설정에서 클립보드 권한을 확인해주세요.');
+        }
+    });
+    
+    // 닫기 버튼 이벤트
+    document.getElementById('dismiss-clipboard-banner').addEventListener('click', () => {
+        banner.remove();
+    });
+    
+    // 10초 후 자동으로 배경색 변경 (덜 강조)
+    setTimeout(() => {
+        if (banner.parentElement) {
+            banner.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
+        }
+    }, 10000);
 }
 
 async function fetchJson(url, options = {}) {
@@ -4217,4 +4413,5 @@ if (window.location.hash === '#debug') {
 }
 
 console.log('🎉 WaferMapViewer 최적화 완료!');
+console.log('성능 모니터링: URL에 #debug 추가');
 console.log('성능 모니터링: URL에 #debug 추가');
