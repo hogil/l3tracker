@@ -1,384 +1,530 @@
 """
-🚀 L3Tracker - Wafer Map Viewer API
-사용자 요청 최우선 처리 시스템
+L3Tracker - Wafer Map Viewer API (Config-driven, Max-Throughput)
+- config.py로 모든 주요 파라미터 외부화
+- 파일명 대소문자 무시 부분일치 검색(모든 하위폴더)
+- 유저 요청 최우선(요청 중 백그라운드 즉시 양보/일시정지)
+- 폴더 리스트: os.scandir + LRU 캐시
+- 이미지/썸네일: ETag(If-None-Match) + 304 Not Modified + 강한 캐시
+- 썸네일: ThreadPoolExecutor + 동시 생성 제한(config.THUMBNAIL_SEM)
+- 인덱스: 백그라운드 구축(양보), 인메모리 우선 검색(offset/limit)
 """
 
 import os
+import time
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-from PIL import Image
-import io
+from typing import List, Optional, Dict, Any, Set, Tuple
+from collections import OrderedDict
+from threading import RLock
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import time
 
-# 로깅 설정
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, FileResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+from PIL import Image
+
+import api.config as config
+
+# ========== 로깅 ==========
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("l3tracker")
 
-# 설정
-ROOT_DIR = Path("D:/project/data/wm-811k")
-THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
-THUMBNAIL_SIZE = (512, 512)
-THUMBNAIL_QUALITY = 100
-SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif'}
+# ========== 설정 바인딩 ==========
+ROOT_DIR = config.ROOT_DIR
+THUMBNAIL_DIR = config.THUMBNAIL_DIR
+SUPPORTED_EXTENSIONS = set(ext.lower() for ext in config.SUPPORTED_EXTS)
 
-# 전역 변수 (사용자 요청 우선)
+THUMBNAIL_FORMAT = config.THUMBNAIL_FORMAT
+THUMBNAIL_QUALITY = config.THUMBNAIL_QUALITY
+THUMBNAIL_SIZE_DEFAULT = config.THUMBNAIL_SIZE_DEFAULT
+
+IO_THREADS = config.IO_THREADS
+THUMBNAIL_SEM_SIZE = config.THUMBNAIL_SEM
+
+DIRLIST_CACHE_SIZE = config.DIRLIST_CACHE_SIZE
+THUMB_STAT_TTL_SECONDS = config.THUMB_STAT_TTL_SECONDS
+THUMB_STAT_CACHE_CAPACITY = config.THUMB_STAT_CACHE_CAPACITY
+
+SKIP_DIRS = {d.strip() for d in config.SKIP_DIRS if d.strip()}
+
+# ========== 스레드풀/세마포어 ==========
+IO_POOL = ThreadPoolExecutor(max_workers=IO_THREADS)
+THUMBNAIL_SEM = asyncio.Semaphore(THUMBNAIL_SEM_SIZE)
+
+# ========== 전역 상태 ==========
 USER_ACTIVITY_FLAG = False
 BACKGROUND_TASKS_PAUSED = False
-FILE_CACHE = {}
-THUMBNAIL_CACHE = {}
+INDEX_BUILDING = False
+INDEX_READY = False
 
-# FastAPI 앱
-app = FastAPI(title="L3Tracker API", version="1.0.0")
+# rel_path -> {"name_lower": str, "size": int, "modified": float}
+FILE_INDEX: Dict[str, Dict[str, Any]] = {}
+FILE_INDEX_LOCK = RLock()
 
-# CORS 설정
+# ========== 캐시 ==========
+class LRUCache:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self._lock = RLock()
+
+    def get(self, key: str):
+        with self._lock:
+            val = self._cache.get(key)
+            if val is None:
+                return None
+            self._cache.move_to_end(key)
+            return val
+
+    def set(self, key: str, value: Any):
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = value
+            if len(self._cache) > self.capacity:
+                self._cache.popitem(last=False)
+
+DIRLIST_CACHE = LRUCache(DIRLIST_CACHE_SIZE)
+
+class TTLCache:
+    def __init__(self, ttl_sec: float, capacity: int):
+        self.ttl = ttl_sec
+        self.capacity = capacity
+        self._data: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
+        self._lock = RLock()
+
+    def get(self, key: str):
+        now = time.time()
+        with self._lock:
+            item = self._data.get(key)
+            if not item:
+                return None
+            exp, val = item
+            if exp < now:
+                del self._data[key]
+                return None
+            self._data.move_to_end(key)
+            return val
+
+    def set(self, key: str, value: Any):
+        now = time.time()
+        with self._lock:
+            if key in self._data:
+                self._data.move_to_end(key)
+            self._data[key] = (now + self.ttl, value)
+            if len(self._data) > self.capacity:
+                self._data.popitem(last=False)
+
+THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
+
+# ========== FastAPI ==========
+app = FastAPI(title="L3Tracker API", version="2.0.0")
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"],
 )
 
-# 정적 파일 서빙은 API 엔드포인트 뒤에 배치
+# ========== 유틸 ==========
+def is_supported_image(path: Path) -> bool:
+    return path.suffix.lower() in SUPPORTED_EXTENSIONS
 
-# 유틸리티 함수들
-def is_supported_image(file_path: Path) -> bool:
-    """지원되는 이미지 파일인지 확인"""
-    return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
-
-def get_thumbnail_path(image_path: Path, size: tuple = THUMBNAIL_SIZE) -> Path:
-    """썸네일 파일 경로 생성"""
+def get_thumbnail_path(image_path: Path, size: Tuple[int, int]) -> Path:
     relative_path = image_path.relative_to(ROOT_DIR)
-    thumbnail_name = f"{relative_path.stem}_{size[0]}x{size[1]}.webp"
+    thumbnail_name = f"{relative_path.stem}_{size[0]}x{size[1]}.{THUMBNAIL_FORMAT.lower()}"
     return THUMBNAIL_DIR / relative_path.parent / thumbnail_name
 
-def safe_resolve_path(path: Optional[str] = None) -> Path:
-    """안전한 경로 해석"""
+def safe_resolve_path(path: Optional[str]) -> Path:
     if not path:
         return ROOT_DIR
-    
     try:
-        target = ROOT_DIR / path
-        resolved = target.resolve()
-        
-        # 보안 검사: ROOT_DIR 밖으로 나가지 않도록
-        if not str(resolved).startswith(str(ROOT_DIR.resolve())):
+        normalized = os.path.normpath(str(path).lstrip("/\\"))
+        target = (ROOT_DIR / normalized).resolve()
+        if not str(target).startswith(str(ROOT_DIR)):
             raise HTTPException(status_code=400, detail="Invalid path")
-        
-        return resolved
+        return target
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"경로 해석 실패: {path}, 오류: {e}")
         raise HTTPException(status_code=400, detail="Invalid path")
 
-# 사용자 활동 감지 및 백그라운드 작업 제어
+def compute_etag(st) -> str:
+    return f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
+
+# ========== 유저 우선 ==========
 def set_user_activity():
-    """사용자 활동 감지 - 백그라운드 작업 일시 중지"""
     global USER_ACTIVITY_FLAG, BACKGROUND_TASKS_PAUSED
     USER_ACTIVITY_FLAG = True
     BACKGROUND_TASKS_PAUSED = True
-    logger.info("사용자 활동 감지 - 백그라운드 작업 일시 중지")
 
 def clear_user_activity():
-    """사용자 활동 플래그 초기화"""
     global USER_ACTIVITY_FLAG
     USER_ACTIVITY_FLAG = False
 
 def can_run_background_task() -> bool:
-    """백그라운드 작업 실행 가능 여부"""
     return not BACKGROUND_TASKS_PAUSED and not USER_ACTIVITY_FLAG
 
-# 사용자 요청 우선 처리 미들웨어
 @app.middleware("http")
-async def user_priority_middleware(request, call_next):
-    """사용자 요청 우선 처리 미들웨어"""
+async def user_priority_middleware(request: Request, call_next):
     set_user_activity()
-    
-    # 사용자 요청 즉시 처리
-    response = await call_next(request)
-    
-    # 응답 후 백그라운드 작업 재개 준비
-    asyncio.create_task(delayed_background_resume())
-    
+    try:
+        response = await call_next(request)
+    finally:
+        asyncio.create_task(delayed_background_resume())
     return response
 
 async def delayed_background_resume():
-    """지연된 백그라운드 작업 재개"""
-    await asyncio.sleep(2.0)  # 2초 후 백그라운드 작업 재개
+    await asyncio.sleep(1.5)  # 짧게
     global BACKGROUND_TASKS_PAUSED
     BACKGROUND_TASKS_PAUSED = False
-    logger.info("백그라운드 작업 재개 준비 완료")
+    clear_user_activity()
+    logger.debug("백그라운드 재개")
 
-# API 엔드포인트들
+# ========== 디렉터리 나열 ==========
+def list_dir_fast(target: Path) -> List[Dict[str, str]]:
+    key = str(target)
+    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    items: List[Dict[str, str]] = []
+    try:
+        with os.scandir(target) as it:
+            for entry in it:
+                name = entry.name
+                if name.startswith('.') or name == '__pycache__':
+                    continue
+                if name in SKIP_DIRS:
+                    continue
+                typ = "directory" if entry.is_dir(follow_symlinks=False) else "file"
+                items.append({"name": name, "type": typ})
+        items.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
+        DIRLIST_CACHE.set(key, items)
+    except FileNotFoundError:
+        pass
+    return items
+
+# ========== 인덱스 ==========
+async def build_file_index_background():
+    global INDEX_BUILDING, INDEX_READY
+    if INDEX_BUILDING:
+        return
+    INDEX_BUILDING = True
+    INDEX_READY = False
+    logger.info("백그라운드 인덱스 구축 시작")
+
+    def _walk_and_index():
+        global INDEX_READY
+        start = time.time()
+        for root, dirs, files in os.walk(ROOT_DIR):
+            # 유저 요청 시 자주 양보
+            if BACKGROUND_TASKS_PAUSED or USER_ACTIVITY_FLAG:
+                time.sleep(0.1)
+            # 폴더 프룬
+            for skip in list(SKIP_DIRS):
+                if skip in dirs:
+                    dirs.remove(skip)
+
+            for fn in files:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext not in SUPPORTED_EXTENSIONS:
+                    continue
+                full = Path(root) / fn
+                try:
+                    rel = str(full.relative_to(ROOT_DIR)).replace("\\", "/")
+                except Exception:
+                    continue
+                try:
+                    st = full.stat()
+                    rec = {"name_lower": fn.lower(), "size": st.st_size, "modified": st.st_mtime}
+                    with FILE_INDEX_LOCK:
+                        FILE_INDEX[rel] = rec
+                except Exception:
+                    continue
+            time.sleep(0.001)
+        INDEX_READY = True
+        logger.info(f"인덱스 구축 완료: {len(FILE_INDEX)}개, {time.time()-start:.1f}s")
+
+    try:
+        await asyncio.get_running_loop().run_in_executor(IO_POOL, _walk_and_index)
+    finally:
+        INDEX_BUILDING = False
+
+# ========== 썸네일 ==========
+def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple[int, int]):
+    thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path) as img:
+        img.thumbnail(size, Image.Resampling.LANCZOS)
+        img.save(thumbnail_path, THUMBNAIL_FORMAT.upper(), quality=THUMBNAIL_QUALITY, optimize=True)
+
+async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
+    thumb = get_thumbnail_path(image_path, size)
+    key = f"{thumb}|{size[0]}x{size[1]}"
+    cached = THUMB_STAT_CACHE.get(key)
+    if cached:
+        return thumb
+
+    if thumb.exists() and thumb.stat().st_size > 0:
+        THUMB_STAT_CACHE.set(key, True)
+        return thumb
+
+    async with THUMBNAIL_SEM:
+        if thumb.exists() and thumb.stat().st_size > 0:
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
+        await asyncio.get_running_loop().run_in_executor(
+            IO_POOL, _generate_thumbnail_sync, image_path, thumb, size
+        )
+        THUMB_STAT_CACHE.set(key, True)
+        return thumb
+
+# ========== 공통: ETag/304 ==========
+def maybe_304(request: Request, st) -> Optional[Response]:
+    etag = compute_etag(st)
+    inm = request.headers.get("if-none-match")
+    if inm and inm == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=604800, immutable"})
+    return None
+
+# ========== 엔드포인트 ==========
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None):
-    """📁 폴더 내용 조회 - 사용자 우선 처리"""
     try:
-        # 사용자 활동 플래그 설정
         set_user_activity()
-        
         target = safe_resolve_path(path)
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
-        
-        # 즉시 응답을 위한 빠른 파일 목록 생성
-        items = []
-        for entry in target.iterdir():
-            if entry.name.startswith('.') or entry.name == '__pycache__':
-                continue
-            if entry.name in ['classification', 'thumbnails']:
-                continue
-            
-            items.append({
-                "name": entry.name,
-                "type": "directory" if entry.is_dir() else "file"
-            })
-        
-        # 빠른 정렬 (사용자 응답 우선)
-        try:
-            items.sort(key=lambda x: (not x["type"] == "directory", x["name"].lower()))
-        except:
-            pass  # 정렬 실패해도 응답은 보냄
-        
-        logger.info(f"폴더 내용 조회 완료: {path or 'root'} ({len(items)}개 항목)")
+        items = list_dir_fast(target)
         return {"success": True, "items": items}
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"폴더 조회 실패: {e}")
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        logger.exception(f"폴더 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/image")
-async def get_image(path: str):
-    """🖼️ 이미지 파일 제공 - 사용자 우선 처리"""
+async def get_image(request: Request, path: str):
     try:
         set_user_activity()
-        
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
-        
         if not is_supported_image(image_path):
             raise HTTPException(status_code=400, detail="Unsupported image format")
-        
-        logger.info(f"이미지 제공: {path}")
-        return FileResponse(image_path)
-        
+
+        st = image_path.stat()
+        resp_304 = maybe_304(request, st)
+        if resp_304:
+            return resp_304
+
+        headers = {"Cache-Control": "public, max-age=86400, immutable", "ETag": compute_etag(st)}
+        return FileResponse(image_path, headers=headers)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"이미지 제공 실패: {e}")
+        logger.exception(f"이미지 제공 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/thumbnail")
-async def get_thumbnail(path: str, size: int = 512):
-    """🖼️ 썸네일 제공 - 사용자 우선 처리"""
+async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_DEFAULT):
     try:
         set_user_activity()
-        
         image_path = safe_resolve_path(path)
-        if not image_path.exists():
+        if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
-        
-        thumbnail_size = (size, size)
-        thumbnail_path = get_thumbnail_path(image_path, thumbnail_size)
-        
-        # 썸네일이 있으면 즉시 제공
-        if thumbnail_path.exists() and thumbnail_path.stat().st_size > 0:
-            logger.info(f"기존 썸네일 제공: {path}")
-            return FileResponse(thumbnail_path)
-        
-        # 썸네일이 없으면 즉시 생성 (사용자 응답 우선)
-        try:
-            with Image.open(image_path) as img:
-                img.thumbnail(thumbnail_size, Image.Resampling.LANCZOS)
-                
-                # WebP로 저장
-                thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-                img.save(thumbnail_path, "WEBP", quality=THUMBNAIL_QUALITY, optimize=True)
-                
-                logger.info(f"썸네일 즉시 생성 완료: {path}")
-                return FileResponse(thumbnail_path)
-                
-        except Exception as e:
-            logger.error(f"썸네일 생성 실패: {e}")
-            # 썸네일 생성 실패 시 원본 이미지 제공
-            return FileResponse(image_path)
-            
+        if not is_supported_image(image_path):
+            raise HTTPException(status_code=400, detail="Unsupported image format")
+
+        target_size = (size, size)
+        thumb = await generate_thumbnail(image_path, target_size)
+
+        st = thumb.stat()
+        resp_304 = maybe_304(request, st)
+        if resp_304:
+            return resp_304
+
+        headers = {"Cache-Control": "public, max-age=604800, immutable", "ETag": compute_etag(st)}
+        return FileResponse(thumb, headers=headers)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"썸네일 제공 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"썸네일 제공 실패: {e}")
+        return await get_image(request, path)
 
 @app.get("/api/classes")
 async def get_classes():
-    """🏷️ 분류 클래스 목록 - 사용자 우선 처리"""
     try:
         set_user_activity()
-        
         classification_dir = ROOT_DIR / "classification"
         if not classification_dir.exists():
             return {"success": True, "classes": []}
-        
         classes = []
-        for item in classification_dir.iterdir():
-            if item.is_dir():
-                classes.append(item.name)
-        
+        try:
+            with os.scandir(classification_dir) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        classes.append(entry.name)
+        except FileNotFoundError:
+            pass
         classes.sort()
-        logger.info(f"분류 클래스 목록 조회: {len(classes)}개")
         return {"success": True, "classes": classes}
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"분류 클래스 조회 실패: {e}")
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        logger.exception(f"분류 클래스 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/search")
-async def search_files(q: str = Query(..., description="검색 쿼리")):
-    """🔍 파일 검색 - 사용자 우선 처리"""
+async def search_files(
+    q: str = Query(..., description="파일명 검색(대소문자 무시, 부분일치)"),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0)
+):
+    """인덱스 우선 + 디스크 스캔 보강 (offset/limit 지원)"""
     try:
         set_user_activity()
-        
-        if not q.strip():
-            return {"success": True, "results": []}
-        
-        query = q.lower().strip()
-        results = []
-        
-        # 빠른 검색 (사용자 응답 우선)
-        try:
-            for img_path in ROOT_DIR.rglob("*"):
-                if not img_path.is_file() or not is_supported_image(img_path):
-                    continue
-                
-                # classification, thumbnails 폴더 제외
-                if "classification" in img_path.parts or "thumbnails" in img_path.parts:
-                    continue
-                
-                # 파일명에 검색어 포함 여부 확인
-                if query in img_path.name.lower():
-                    rel_path = str(img_path.relative_to(ROOT_DIR))
-                    results.append(f"/{rel_path}")
-                
-                # 사용자 활동 감지 시 검색 중단
-                if USER_ACTIVITY_FLAG:
-                    logger.info("사용자 활동 감지 - 검색 중단")
-                    break
-                    
-        except Exception as e:
-            logger.error(f"검색 중 오류: {e}")
-        
-        logger.info(f"검색 완료: '{q}' -> {len(results)}개 결과")
-        return {"success": True, "results": results}
-        
+        query = (q or "").strip().lower()
+        if not query:
+            return {"success": True, "results": [], "offset": offset, "limit": limit}
+
+        # 결과 버킷은 offset+limit까지만 모으고 마지막에 슬라이싱
+        goal = offset + limit
+        bucket: List[str] = []
+
+        # 1) 인덱스 스냅샷
+        with FILE_INDEX_LOCK:
+            items = list(FILE_INDEX.items())
+
+        if items:
+            for rel, meta in items:
+                if query in meta["name_lower"]:
+                    bucket.append(rel)
+                    if len(bucket) >= goal:
+                        break
+
+        # 2) 부족하면 디스크 스캔
+        if len(bucket) < goal:
+            seen = set(bucket)
+            need = goal - len(bucket)
+
+            def _scan():
+                nonlocal need
+                for root, dirs, files in os.walk(ROOT_DIR):
+                    for skip in list(SKIP_DIRS):
+                        if skip in dirs:
+                            dirs.remove(skip)
+                    for fn in files:
+                        ext = os.path.splitext(fn)[1].lower()
+                        if ext not in SUPPORTED_EXTENSIONS:
+                            continue
+                        low = fn.lower()
+                        if query not in low:
+                            continue
+                        full = Path(root) / fn
+                        try:
+                            rel = str(full.relative_to(ROOT_DIR)).replace("\\", "/")
+                        except Exception:
+                            continue
+                        if rel in seen:
+                            continue
+                        seen.add(rel)
+                        bucket.append(rel)
+                        # 인덱스 즉시 보강
+                        try:
+                            st = full.stat()
+                            rec = {"name_lower": low, "size": st.st_size, "modified": st.st_mtime}
+                            with FILE_INDEX_LOCK:
+                                FILE_INDEX[rel] = rec
+                        except Exception:
+                            pass
+                        need -= 1
+                        if need <= 0:
+                            return
+                    time.sleep(0.001)  # 가벼운 양보
+
+            if need > 0:
+                await asyncio.get_running_loop().run_in_executor(IO_POOL, _scan)
+
+        # 슬라이싱
+        results = bucket[offset: offset + limit]
+        return {"success": True, "results": results, "offset": offset, "limit": limit}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"검색 실패: {e}")
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        logger.exception(f"검색 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/files/all")
 async def get_all_files():
-    """📋 전체 파일 목록 - 사용자 우선 처리"""
     try:
         set_user_activity()
-        
-        # 캐시된 결과가 있으면 즉시 반환
-        if FILE_CACHE:
-            logger.info("캐시된 전체 파일 목록 제공")
-            return {"success": True, "files": list(FILE_CACHE.keys())}
-        
-        # 백그라운드에서 전체 파일 목록 구축 (사용자 응답 지연 없음)
-        asyncio.create_task(build_file_index_background())
-        
-        # 즉시 빈 결과 반환 (사용자 응답 우선)
-        logger.info("전체 파일 목록 백그라운드 구축 시작")
-        return {"success": True, "files": []}
-        
+        with FILE_INDEX_LOCK:
+            keys = list(FILE_INDEX.keys())
+        if not keys and not INDEX_BUILDING:
+            asyncio.create_task(build_file_index_background())
+        return {"success": True, "files": keys}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"전체 파일 목록 조회 실패: {e}")
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        logger.exception(f"전체 파일 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-async def build_file_index_background():
-    """백그라운드에서 전체 파일 인덱스 구축"""
-    global FILE_CACHE
-    
+@app.get("/api/index/status")
+async def index_status():
+    with FILE_INDEX_LOCK:
+        n = len(FILE_INDEX)
+    return {"building": INDEX_BUILDING, "ready": INDEX_READY, "count": n}
+
+# 정적 파일
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/")
+async def read_root():
     try:
-        # 사용자 활동이 없을 때만 실행
-        if not can_run_background_task():
-            logger.info("사용자 활동 감지 - 백그라운드 인덱스 구축 연기")
-            return
-        
-        logger.info("백그라운드 전체 파일 인덱스 구축 시작")
-        
-        for img_path in ROOT_DIR.rglob("*"):
-            if not img_path.is_file() or not is_supported_image(img_path):
-                continue
-            
-            if "classification" in img_path.parts or "thumbnails" in img_path.parts:
-                continue
-            
-            rel_path = str(img_path.relative_to(ROOT_DIR))
-            FILE_CACHE[rel_path] = {
-                "size": img_path.stat().st_size,
-                "modified": img_path.stat().st_mtime
-            }
-            
-            # 사용자 활동 감지 시 즉시 중단
-            if USER_ACTIVITY_FLAG:
-                logger.info("사용자 활동 감지 - 백그라운드 인덱스 구축 중단")
-                break
-            
-            # CPU 양보
-            await asyncio.sleep(0.01)
-        
-        logger.info(f"백그라운드 인덱스 구축 완료: {len(FILE_CACHE)}개 파일")
-        
+        html_path = Path("index.html")
+        if html_path.exists():
+            return FileResponse(html_path)
+        return {"message": "index.html not found"}
     except Exception as e:
-        logger.error(f"백그라운드 인덱스 구축 실패: {e}")
+        logger.exception(f"루트 페이지 로드 실패: {e}")
+        return {"error": "Failed to load main page"}
 
-# 정적 파일 서빙 (API 엔드포인트 뒤에 배치)
-app.mount("/", StaticFiles(directory="..", html=True), name="static")
+@app.get("/main.js")
+async def get_main_js():
+    try:
+        js_path = Path("main.js")
+        if js_path.exists():
+            return FileResponse(js_path)
+        return {"message": "main.js not found"}
+    except Exception as e:
+        logger.exception(f"main.js 로드 실패: {e}")
+        return {"error": "Failed to load main.js"}
 
-# 서버 시작/종료 이벤트
+# ========== 라이프사이클 ==========
 @app.on_event("startup")
 async def startup_event():
-    """🚀 서버 시작 - 사용자 우선 처리 시스템 초기화"""
-    logger.info("🚀 L3Tracker 서버 시작 - 사용자 우선 처리 시스템")
-    logger.info(f"📁 이미지 루트: {ROOT_DIR}")
-    logger.info(f"🌐 서버 주소: http://0.0.0.0:8080")
-    logger.info(f"📊 썸네일 디렉토리: {THUMBNAIL_DIR}")
-    logger.info("⚡ 사용자 요청 최우선 처리 시스템 활성화")
+    logger.info("🚀 L3Tracker 서버 시작 (Config-driven Max-Throughput)")
+    logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
+    logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
+    asyncio.create_task(build_file_index_background())
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """🛑 서버 종료"""
     logger.info("🛑 L3Tracker 서버 종료")
+    IO_POOL.shutdown(wait=False)
 
-# 메인 실행
+# ========== 메인 ==========
 if __name__ == "__main__":
-    print("=" * 60)
-    print("🚀 L3Tracker - 사용자 우선 처리 시스템")
-    print("=" * 60)
-    print(f"📁 이미지 루트: {ROOT_DIR}")
-    print(f"🌐 서버 주소: http://0.0.0.0:8080")
-    print(f"📊 썸네일 크기: {THUMBNAIL_SIZE[0]}x{THUMBNAIL_SIZE[1]}")
-    print(f"🎨 썸네일 품질: {THUMBNAIL_QUALITY}%")
-    print("=" * 60)
-    print("⚡ 핵심 기능:")
-    print("  - 사용자 요청 최우선 처리 ✅")
-    print("  - 폴더 열기 즉시 응답 ✅")
-    print("  - 백그라운드 작업 자동 일시 중지 ✅")
-    print("  - 안정적인 서버 운영 ✅")
-    print("=" * 60)
-    
+    import uvicorn
     uvicorn.run(
-        "api.main:app",
-        host="0.0.0.0",
-        port=8080,
-        reload=False,
-        workers=1,  # 단일 워커로 안정성 확보
-        log_level="info"
+        app,
+        host=config.DEFAULT_HOST,
+        port=config.DEFAULT_PORT,
+        reload=config.DEFAULT_RELOAD,
+        workers=config.DEFAULT_WORKERS,
+        log_level="info",
     )

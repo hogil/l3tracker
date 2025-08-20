@@ -1,28 +1,33 @@
 import os
 from pathlib import Path
 
-# ⚠️ 새로운 PC에서 사용하려면 이 경로를 수정하세요!
-# 예시: "C:/Users/사용자명/Documents/images" 또는 "/home/사용자명/images"
-ROOT_DIR = Path("D:/project/data/wm-811k").resolve()
-
-# 환경변수로 재정의 가능 (선택사항)
-if os.getenv("PROJECT_ROOT"):
-    ROOT_DIR = Path(os.getenv("PROJECT_ROOT")).resolve()
-
+# ===== 경로 / 포맷 =====
+ROOT_DIR = Path(os.getenv("PROJECT_ROOT", "D:/project/data/wm-811k")).resolve()
 THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
-THUMBNAIL_SIZE = (512, 512)
-THUMBNAIL_FORMAT = 'WEBP'
-THUMBNAIL_QUALITY = 100
-THUMBNAIL_CACHE_SECONDS = 86400  # 24시간
-SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
-MAX_WORKERS = 16
-MAX_THUMBNAIL_BATCH = 30
 
-# 백그라운드 썸네일 생성 설정
-BACKGROUND_SCAN_INTERVAL = int(os.getenv("BACKGROUND_SCAN_INTERVAL", "300"))  # 5분 (초)
-BACKGROUND_BATCH_SIZE = int(os.getenv("BACKGROUND_BATCH_SIZE", "10"))  # 한 번에 처리할 이미지 수 (사용자 액션 우선순위)
-BACKGROUND_WORKERS = max(2, MAX_WORKERS // 4)
+# 썸네일 기본 한 변 크기 (정사각형), 저장 포맷/품질
+THUMBNAIL_SIZE_DEFAULT = int(os.getenv("THUMBNAIL_SIZE", "512"))  # e.g. 512 -> 512x512
+THUMBNAIL_FORMAT = os.getenv("THUMBNAIL_FORMAT", "WEBP")
+THUMBNAIL_QUALITY = int(os.getenv("THUMBNAIL_QUALITY", "100"))
 
-# 서버 설정
+# 지원 확장자 (입력 이미지)
+SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif'}
+
+# 검색/인덱싱 시 스킵할 폴더
+SKIP_DIRS = set(os.getenv("SKIP_DIRS", "classification,thumbnails").split(","))
+
+# ===== 동시성 / 성능 =====
+CPU_COUNT = os.cpu_count() or 8
+IO_THREADS = int(os.getenv("IO_THREADS", "0")) or max(8, CPU_COUNT)  # 디코딩/파일 I/O 풀
+THUMBNAIL_SEM = int(os.getenv("THUMBNAIL_SEM", "32"))               # 썸네일 동시 생성 제한
+
+# 캐시
+DIRLIST_CACHE_SIZE = int(os.getenv("DIRLIST_CACHE_SIZE", "1024"))
+THUMB_STAT_TTL_SECONDS = float(os.getenv("THUMB_STAT_TTL_SECONDS", "5"))
+THUMB_STAT_CACHE_CAPACITY = int(os.getenv("THUMB_STAT_CACHE_CAPACITY", "8192"))
+
+# ===== 서버 기본값 (원하면 CLI로 덮어쓰기 권장) =====
 DEFAULT_HOST = os.getenv("HOST", "0.0.0.0")
-DEFAULT_PORT = int(os.getenv("PORT", "8080"))  # 기본 포트를 8080으로 변경  # 백그라운드 전용 워커 수
+DEFAULT_PORT = int(os.getenv("PORT", "8080"))
+DEFAULT_RELOAD = os.getenv("RELOAD", "0") == "1"   # 개발용: RELOAD=1
+DEFAULT_WORKERS = int(os.getenv("WORKERS", "1"))  # 운영은 CLI의 --workers 권장

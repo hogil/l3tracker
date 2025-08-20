@@ -266,7 +266,6 @@ class WaferMapViewer {
             deleteClassBtn: document.getElementById('delete-class-btn'),
             fileSearch: document.getElementById('file-search'),
             searchBtn: document.getElementById('search-btn'),
-            gridDownloadSelected: document.getElementById('grid-download-selected'),
         };
         for (const [key, el] of Object.entries(this.dom)) {
             if (!el) {
@@ -889,10 +888,7 @@ class WaferMapViewer {
             });
         }
         
-        // 선택된 파일 다운로드 기능
-        if (this.dom.gridDownloadSelected) {
-            this.dom.gridDownloadSelected.addEventListener('click', () => this.downloadSelectedImages());
-        }
+
     }
 
     /**

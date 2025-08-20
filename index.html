@@ -149,12 +149,52 @@
             display: flex;
             flex-direction: row;
             align-items: center;
-            gap: 18px;
-            padding: 10px 18px 6px 18px;
+            gap: 24px;
+            padding: 12px 20px 8px 20px;
             background: rgba(30, 30, 30, 0.96);
             border-bottom: 1px solid #222;
             box-sizing: border-box;
             position: static;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        .search-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-left: auto;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        
+        #file-search {
+            background: #333 !important;
+            color: #fff !important;
+            border: 1px solid #555 !important;
+            border-radius: 4px !important;
+            font-size: 14px !important;
+            padding: 6px 12px !important;
+            width: 400px !important;
+            max-width: 60% !important;
+            min-width: 250px !important;
+            transition: border-color 0.2s ease;
+        }
+        
+        #file-search:focus {
+            outline: none;
+            border-color: #007acc !important;
+            box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+        }
+        
+        #file-search::placeholder {
+            color: #999;
+            font-style: italic;
         }
         
         .grid-btn {
@@ -167,6 +207,12 @@
             font-weight: 500;
             cursor: pointer;
             transition: background 0.15s, border 0.15s;
+            white-space: nowrap;
+        }
+        
+        .selection-btn {
+            min-width: 80px;
+            padding: 6px 20px;
         }
         
         .grid-btn:hover {
@@ -179,6 +225,7 @@
             color: #bbb;
             font-size: 14px;
             margin-right: 4px;
+            white-space: nowrap;
         }
         
         /* Viewer Container */
@@ -712,17 +759,23 @@
         <section class="main-content">
             <!-- Grid Controls -->
             <div id="grid-controls" style="flex-wrap: nowrap;">
-                <span class="grid-zoom-label">Columns</span>
-                <button id="grid-cols-minus" class="grid-btn" aria-label="컬럼 감소">-</button>
-                <input type="range" id="grid-cols-range" min="1" max="10" value="3" step="1" aria-label="그리드 컬럼 수">
-                <button id="grid-cols-plus" class="grid-btn" aria-label="컬럼 증가">+</button>
-                <button id="grid-select-all" class="grid-btn" aria-label="전체 선택">전체선택</button>
-                <button id="grid-deselect-all" class="grid-btn" aria-label="전체 해제">전체해제</button>
-                <button id="grid-download-selected" class="grid-btn" aria-label="선택된 파일 다운로드">선택파일 다운로드</button>
+                <!-- Column Controls Group -->
+                <div class="control-group">
+                    <span class="grid-zoom-label">Columns</span>
+                    <button id="grid-cols-minus" class="grid-btn" aria-label="컬럼 감소">-</button>
+                    <input type="range" id="grid-cols-range" min="1" max="10" value="3" step="1" aria-label="그리드 컬럼 수">
+                    <button id="grid-cols-plus" class="grid-btn" aria-label="컬럼 증가">+</button>
+                </div>
+                
+                <!-- Selection Controls Group -->
+                <div class="control-group">
+                    <button id="grid-select-all" class="grid-btn selection-btn" aria-label="전체 선택">전체선택</button>
+                    <button id="grid-deselect-all" class="grid-btn selection-btn" aria-label="전체 해제">전체해제</button>
+                </div>
                 
                 <!-- Search Controls -->
-                <div style="display: flex; align-items: center; gap: 8px; margin-left: 20px; flex: 1 1 auto; min-width: 0;">
-                    <input type="text" id="file-search" placeholder="파일명 입력" style="padding: 4px 8px; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; width: 280px; max-width: 50%; min-width: 180px;">
+                <div class="search-controls">
+                    <input type="text" id="file-search" placeholder="파일명 입력 (AND, OR, NOT, () 사용 가능)">
                     <button id="search-btn" class="grid-btn" aria-label="검색">검색</button>
                 </div>
             </div>
