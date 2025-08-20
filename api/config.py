@@ -12,7 +12,7 @@ if os.getenv("PROJECT_ROOT"):
 THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
 THUMBNAIL_SIZE = (512, 512)
 THUMBNAIL_FORMAT = 'WEBP'
-THUMBNAIL_QUALITY = 95
+THUMBNAIL_QUALITY = 100
 THUMBNAIL_CACHE_SECONDS = 86400  # 24시간
 SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
 MAX_WORKERS = 16

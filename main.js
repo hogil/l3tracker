@@ -11,7 +11,7 @@
 
 // Constants
 const DEFAULT_GRID_COLS = 3;
-const DEFAULT_THUMB_SIZE = 128;
+const DEFAULT_THUMB_SIZE = 512;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH_RATIO = 0.5;
 const MIN_DRAG_DISTANCE = 5;
@@ -77,7 +77,7 @@ class ThumbnailManager {
         this.concurrentLoads++;
         
         try {
-            const response = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=128`);
+            const response = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512`);
             if (response.ok) {
                 const blob = await response.blob();
                 return URL.createObjectURL(blob);
@@ -3691,15 +3691,7 @@ class WaferMapViewer {
             // 이미지 로드 핸들러
             img.onload = () => {
                 img.style.opacity = '1';
-                
-                // 썸네일로 교체 (더 안정적인 타이밍)
-                // 이미지 로드 완료 후 다음 프레임에서 썸네일 교체
-                requestAnimationFrame(() => {
-                    // DOM에 아직 존재하는지 확인
-                    if (img.parentElement) {
-                        this.replaceWithThumbnail(img, imgPath);
-                    }
-                });
+                // 원본 이미지 유지 - 썸네일로 교체하지 않음
             };
             
             img.onerror = () => {
@@ -3715,8 +3707,8 @@ class WaferMapViewer {
                 }, 500);
             };
             
-            // 이미지 소스 설정 (즉시 로드 시작)
-            img.src = `/api/image?path=${encodeURIComponent(imgPath)}`;
+            // 고화질 썸네일로 시작 (빠른 로딩)
+            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512`;
             thumbBox.appendChild(img);
             wrap.appendChild(thumbBox);
             // Checkmark
