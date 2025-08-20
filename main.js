@@ -345,10 +345,9 @@ class WaferMapViewer {
         if (this.dom.viewerContainer)
             this.dom.viewerContainer.addEventListener('contextmenu', e => {
                 if (this.gridMode) return; // 그리드 모드에서는 기존 컨텍스트 사용
-                if (this.selectedImagePath) {
-                    e.preventDefault();
-                    this.downloadImage(this.selectedImagePath);
-                }
+                if (!this.selectedImagePath) return;
+                e.preventDefault();
+                this.showSingleContextMenu(e);
             });
         if (this.dom.viewerContainer)
             new ResizeObserver(() => this.handleResize()).observe(this.dom.viewerContainer);
@@ -1368,6 +1367,7 @@ class WaferMapViewer {
     initializeContextMenu() {
         const downloadItem = document.getElementById('context-download');
         const mergeCopyItem = document.getElementById('context-merge-copy');
+        const mergeSaveItem = document.getElementById('context-merge-save');
         const listCopyItem = document.getElementById('context-list-copy');
         const tableCopyItem = document.getElementById('context-table-copy');
         const cancelItem = document.getElementById('context-cancel');
@@ -1383,6 +1383,13 @@ class WaferMapViewer {
             mergeCopyItem.onclick = () => {
                 this.hideContextMenu();
                 this.mergeAndCopyImages();
+            };
+        }
+
+        if (mergeSaveItem) {
+            mergeSaveItem.onclick = () => {
+                this.hideContextMenu();
+                this.mergeAndSaveImages();
             };
         }
 
@@ -1415,26 +1422,9 @@ class WaferMapViewer {
             }
 
             const selectedCount = this.gridSelectedIdxs.length;
-            
-            // 개수에 따라 적절한 그리드 크기 계산
-            let cols, rows;
-            if (selectedCount <= 4) {
-                cols = 2; rows = 2;
-            } else if (selectedCount <= 9) {
-                cols = 3; rows = 3;
-            } else if (selectedCount <= 16) {
-                cols = 4; rows = 4;
-            } else if (selectedCount <= 25) {
-                cols = 5; rows = 5;
-            } else if (selectedCount <= 36) {
-                cols = 6; rows = 6;
-            } else {
-                // 36개 초과시 스크롤 가능한 그리드
-                cols = 6;
-                rows = Math.ceil(selectedCount / cols);
-            }
-            
-            alert(`${selectedCount}개 이미지를 ${cols}x${rows} 그리드로 합치는 중...`);
+            // 최적 그리드 계산 (남는 칸 최소)
+            let cols = Math.ceil(Math.sqrt(selectedCount));
+            let rows = Math.ceil(selectedCount / cols);
 
             // Canvas 생성
             const canvas = document.createElement('canvas');
@@ -1488,7 +1478,7 @@ class WaferMapViewer {
                     if (hasPermission && navigator.clipboard && navigator.clipboard.write) {
                         const item = new ClipboardItem({ 'image/png': blob });
                         await navigator.clipboard.write([item]);
-                        alert(`${selectedCount}개 이미지가 ${cols}x${rows} 그리드로 합쳐져서 클립보드에 복사되었습니다!`);
+                        this.showToast(`${selectedCount}개 이미지 클립보드 복사 완료 (${cols}x${rows})`);
                     } else {
                         throw new Error('클립보드 권한이 없거나 API를 지원하지 않습니다.');
                     }
@@ -1505,13 +1495,149 @@ class WaferMapViewer {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
-                    alert(`클립보드 복사에 실패했습니다. 대신 이미지가 다운로드되었습니다.`);
+                    this.showToast('클립보드 실패 → 파일로 저장 완료');
                 }
             }, 'image/png');
 
         } catch (error) {
             console.error('이미지 합치기 실패:', error);
             alert('이미지 합치기에 실패했습니다.');
+        }
+    }
+
+    async mergeAndSaveImages() {
+        try {
+            if (!this.gridSelectedIdxs || this.gridSelectedIdxs.length === 0) {
+                alert('합칠 이미지를 선택해주세요.');
+                return;
+            }
+
+            const selectedCount = this.gridSelectedIdxs.length;
+            let cols = Math.ceil(Math.sqrt(selectedCount));
+            let rows = Math.ceil(selectedCount / cols);
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const imageSize = 512;
+            canvas.width = cols * imageSize;
+            canvas.height = rows * imageSize;
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const imagePromises = this.gridSelectedIdxs.map(async (idx, index) => {
+                const imagePath = this.selectedImages[idx];
+                const response = await fetch(`/api/image?path=${encodeURIComponent(imagePath)}`);
+                const blob = await response.blob();
+                const img = new Image();
+                return new Promise((resolve, reject) => {
+                    img.onload = () => {
+                        const row = Math.floor(index / cols);
+                        const col = index % cols;
+                        const x = col * imageSize;
+                        const y = row * imageSize;
+                        const scale = Math.min(imageSize / img.width, imageSize / img.height);
+                        const scaledWidth = img.width * scale;
+                        const scaledHeight = img.height * scale;
+                        const offsetX = (imageSize - scaledWidth) / 2;
+                        const offsetY = (imageSize - scaledHeight) / 2;
+                        ctx.drawImage(img, x + offsetX, y + offsetY, scaledWidth, scaledHeight);
+                        resolve();
+                    };
+                    img.onerror = reject;
+                    img.src = URL.createObjectURL(blob);
+                });
+            });
+
+            await Promise.all(imagePromises);
+
+            canvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `merged_images_${cols}x${rows}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.showToast(`합친 이미지 저장 완료 (${cols}x${rows})`);
+            }, 'image/png');
+        } catch (e) {
+            console.error(e);
+            alert('합친 이미지 저장에 실패했습니다.');
+        }
+    }
+
+    showSingleContextMenu(event) {
+        let menu = document.getElementById('single-context-menu');
+        if (!menu) {
+            menu = document.createElement('div');
+            menu.id = 'single-context-menu';
+            menu.style.cssText = 'position:absolute; display:none; background:#333; border:1px solid #555; border-radius:4px; padding:4px 0; z-index:10000; min-width:180px; color:#fff;';
+            menu.innerHTML = `
+                <div id="single-save" class="context-menu-item" style="padding:8px 12px; cursor:pointer; font-size:14px;">📥 원본 저장</div>
+                <div id="single-copy" class="context-menu-item" style="padding:8px 12px; cursor:pointer; font-size:14px;">📋 이미지 클립보드 복사</div>
+            `;
+            document.body.appendChild(menu);
+            menu.querySelector('#single-save').addEventListener('click', () => {
+                if (this.selectedImagePath) this.downloadImage(this.selectedImagePath);
+                this.hideSingleContextMenu();
+            });
+            menu.querySelector('#single-copy').addEventListener('click', async () => {
+                await this.copyCurrentImageToClipboard();
+                this.hideSingleContextMenu();
+            });
+        }
+        menu.style.left = event.pageX + 'px';
+        menu.style.top = event.pageY + 'px';
+        menu.style.display = 'block';
+        this._singleMenuOutsideHandler = (e) => {
+            if (!menu.contains(e.target)) this.hideSingleContextMenu();
+        };
+        document.addEventListener('click', this._singleMenuOutsideHandler);
+    }
+
+    hideSingleContextMenu() {
+        const menu = document.getElementById('single-context-menu');
+        if (menu) menu.style.display = 'none';
+        if (this._singleMenuOutsideHandler) {
+            document.removeEventListener('click', this._singleMenuOutsideHandler);
+            this._singleMenuOutsideHandler = null;
+        }
+    }
+
+    async copyCurrentImageToClipboard() {
+        try {
+            if (!this.selectedImagePath) return;
+            const res = await fetch(`/api/image?path=${encodeURIComponent(this.selectedImagePath)}`);
+            const blob = await res.blob();
+            const img = await createImageBitmap(blob);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob(async (out) => {
+                try {
+                    const hasPermission = await this.ensureClipboardPermission();
+                    if (hasPermission && navigator.clipboard && navigator.clipboard.write) {
+                        const item = new ClipboardItem({ 'image/png': out });
+                        await navigator.clipboard.write([item]);
+                        this.showToast('이미지 클립보드 복사 완료');
+                    } else {
+                        throw new Error('no clipboard');
+                    }
+                } catch (err) {
+                    // 폴백: 다운로드
+                    const url = URL.createObjectURL(out);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = (this.selectedImagePath.split('/').pop() || 'image') + '.png';
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                    this.showToast('클립보드 실패 → 파일로 저장');
+                }
+            }, 'image/png');
+        } catch (e) {
+            console.error(e);
+            alert('이미지 클립보드 복사에 실패했습니다.');
         }
     }
 
