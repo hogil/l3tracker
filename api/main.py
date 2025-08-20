@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from PIL import Image
 import hashlib
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from functools import lru_cache
@@ -39,6 +40,7 @@ class BackgroundThumbnailManager:
         self.last_scan_time = 0
         self.total_generated = 0
         self.scan_count = 0
+        self.min_user_idle_seconds = 1.5  # 사용자가 1.5초 이상 아무 요청이 없을 때만 스캔
         
     async def start(self):
         """백그라운드 썸네일 생성 시작"""
@@ -77,7 +79,12 @@ class BackgroundThumbnailManager:
                 if not self.is_running:
                     break
                     
-                logging.info("주기적 썸네일 스캔 시작")
+                # 사용자 요청 우선: 최근 사용자 액티비티가 있으면 건너뜀
+                if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                    logging.info("사용자 요청 우선 - 이번 주기 스캔 건너뜀")
+                    continue
+                
+                logging.info("주기적 썸네일 스캔 시작 (사용자 유휴 상태)")
                 await self._scan_and_generate()
                 
             except Exception as e:
@@ -127,7 +134,7 @@ class BackgroundThumbnailManager:
                     )
                     tasks.append(task)
                     
-                # 배치 완료 대기
+                # 배치 완료 대기 (중간에도 사용자 요청이 있으면 즉시 중단)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 
                 # 결과 집계
@@ -136,8 +143,13 @@ class BackgroundThumbnailManager:
                         generated_count += 1
                         self.total_generated += 1
                         
-                # CPU 양보 (사용자 액션 우선순위를 위해 더 자주 양보)
-                await asyncio.sleep(0.1)
+                # 사용자 요청 우선: 최근 요청이 있으면 즉시 루프 종료
+                if time.time() - last_user_activity_ts < self.min_user_idle_seconds:
+                    logging.info("사용자 요청 감지 - 썸네일 배치 처리 중단")
+                    break
+                
+                # CPU 양보 (사용자 액션 우선)
+                await asyncio.sleep(0.05)
                 
                 # 진행상황 로그
                 if (i + self.batch_size) % 200 == 0:
@@ -256,6 +268,21 @@ background_thumbnail_manager = BackgroundThumbnailManager()
 app = FastAPI(title="Wafer Map Viewer API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# 사용자 액티비티 타임스탬프 (요청 우선 처리용)
+last_user_activity_ts: float = 0.0
+
+@app.middleware("http")
+async def record_user_activity(request, call_next):
+    # 사용자 요청 들어올 때마다 최근 액티비티 갱신
+    global last_user_activity_ts
+    last_user_activity_ts = time.time()
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        # 응답 후에도 한 번 더 갱신 (스트리밍/대용량 응답 대비)
+        last_user_activity_ts = time.time()
 
 # =====================
 # 애플리케이션 생명주기 관리

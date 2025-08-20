@@ -1049,6 +1049,11 @@ class WaferMapViewer {
             console.log(`파일명 검색 시작: "${fileQuery}"`);
             const startTime = performance.now();
             
+            // 전역 인덱스 미로딩 시 즉시 로드하여 사용자 요청 우선
+            if (!this.allFilesIndexLoaded) {
+                await this.loadAllFilesIndex();
+            }
+
             let matchedImages = [];
             if (this.allFilesIndexLoaded && Array.isArray(this.allFilesIndex)) {
                 // 전역 인덱스 기반 검색 (폴더 미오픈 상태에서도 검색 가능)
