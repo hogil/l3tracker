@@ -1054,17 +1054,30 @@ class WaferMapViewer {
                 await this.loadAllFilesIndex();
             }
 
+            // 서버 검색 API 사용 (빠름) → 실패 시 인덱스/DOM 폴백
             let matchedImages = [];
-            if (this.allFilesIndexLoaded && Array.isArray(this.allFilesIndex)) {
-                // 전역 인덱스 기반 검색 (폴더 미오픈 상태에서도 검색 가능)
-                const q = fileQuery.toLowerCase();
-                matchedImages = this.allFilesIndex.filter(p => {
-                    const name = p.split('/').pop().toLowerCase();
-                    return this.matchesSearchQuery(name, q);
-                });
-            } else {
-                // 폴더 UI에 로드된 DOM 기반 빠른 검색 (폴백)
-                matchedImages = this.fastFileNameSearch(fileQuery);
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(fileQuery)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.success && Array.isArray(data.results)) {
+                        matchedImages = data.results;
+                    }
+                }
+            } catch (e) {
+                // ignore and fallback
+            }
+
+            if (matchedImages.length === 0) {
+                if (this.allFilesIndexLoaded && Array.isArray(this.allFilesIndex)) {
+                    const q = fileQuery.toLowerCase();
+                    matchedImages = this.allFilesIndex.filter(p => {
+                        const name = p.split('/').pop().toLowerCase();
+                        return this.matchesSearchQuery(name, q);
+                    });
+                } else {
+                    matchedImages = this.fastFileNameSearch(fileQuery);
+                }
             }
             
             const endTime = performance.now();

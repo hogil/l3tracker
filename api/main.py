@@ -28,6 +28,32 @@ from utils import get_file_hash, is_supported_image, get_thumbnail_path, safe_re
 # 프로젝트 루트 경로 (정적 파일용)
 PROJECT_ROOT = Path(__file__).parent.parent
 
+# 전역 이미지 인덱스 (상대경로, posix)
+ALL_IMAGE_PATHS: List[str] = []
+
+def build_image_index() -> int:
+    """루트에서 모든 이미지 파일을 재귀적으로 수집하여 인덱스를 구축합니다."""
+    global ALL_IMAGE_PATHS
+    try:
+        excluded_dirs = {"classification", "thumbnails", "__pycache__"}
+        paths: List[str] = []
+        for p in ROOT_DIR.rglob("*"):
+            if not p.is_file():
+                continue
+            if not is_supported_image(p):
+                continue
+            rel = p.relative_to(ROOT_DIR)
+            parts = set(part.lower() for part in rel.parts[:-1])
+            if excluded_dirs & parts:
+                continue
+            paths.append(rel.as_posix())
+        ALL_IMAGE_PATHS = paths
+        logging.info(f"전역 이미지 인덱스 구축: {len(ALL_IMAGE_PATHS)}개")
+        return len(ALL_IMAGE_PATHS)
+    except Exception as e:
+        logging.error(f"전역 이미지 인덱스 구축 실패: {e}")
+        return 0
+
 # =====================
 # 백그라운드 썸네일 생성 시스템
 # =====================
@@ -297,6 +323,9 @@ async def startup_event():
     if cleaned_count > 0:
         logging.info(f"시작 시 {cleaned_count}개 손상된 썸네일 정리 완료")
     
+    # 전역 이미지 인덱스 빌드 (비동기 아님 - 최초 1회)
+    build_image_index()
+
     await background_thumbnail_manager.start()
 
 @app.on_event("shutdown")
@@ -629,6 +658,52 @@ async def get_all_image_files():
         return {"success": True, "files": files}
     except Exception as e:
         logging.error(f"전체 파일 인덱스 생성 중 오류: {e}")
+        return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+@app.get("/api/search")
+async def search_files(q: str):
+    """서버에서 전역 인덱스를 사용해 빠르게 파일명 검색을 수행합니다.
+    - 불리언 연산자는 간단히 지원 (or/and/not, 괄호 없음)
+    - 항상 대소문자 무시
+    """
+    try:
+        if not q or not q.strip():
+            return {"success": True, "results": []}
+        query = q.lower().strip()
+
+        # 간단 파서: or 우선 분리 → 각 토큰에서 and 처리 → not 접두어 처리
+        def matches(name: str) -> bool:
+            ors = [part.strip() for part in query.split(' or ')] if ' or ' in query else [query]
+            for or_term in ors:
+                ands = [a.strip() for a in or_term.split(' and ')] if ' and ' in or_term else [or_term]
+                and_ok = True
+                for term in ands:
+                    if term.startswith('not '):
+                        t = term[4:].strip()
+                        if t and t in name:
+                            and_ok = False
+                            break
+                    else:
+                        if term and term not in name:
+                            and_ok = False
+                            break
+                if and_ok:
+                    return True
+            return False
+
+        # 전역 인덱스가 비어 있으면 재구축
+        if not ALL_IMAGE_PATHS:
+            build_image_index()
+
+        results: List[str] = []
+        qlower = query
+        for p in ALL_IMAGE_PATHS:
+            name = p.split('/')[-1].lower()
+            if matches(name):
+                results.append(p)
+        return {"success": True, "results": results}
+    except Exception as e:
+        logging.error(f"서버 검색 오류: {e}")
         return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
 
 # =====================
