@@ -14,12 +14,15 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 from functools import lru_cache
 from pydantic import BaseModel, Field
-from .config import (
+import sys
+sys.path.append(str(Path(__file__).parent))
+
+from config import (
     ROOT_DIR, THUMBNAIL_DIR, THUMBNAIL_SIZE, THUMBNAIL_FORMAT, THUMBNAIL_QUALITY,
     THUMBNAIL_CACHE_SECONDS, MAX_WORKERS, MAX_THUMBNAIL_BATCH,
     BACKGROUND_SCAN_INTERVAL, BACKGROUND_BATCH_SIZE, BACKGROUND_WORKERS
 )
-from .utils import get_file_hash, is_supported_image, get_thumbnail_path, safe_resolve_path
+from utils import get_file_hash, is_supported_image, get_thumbnail_path, safe_resolve_path
 
 # 프로젝트 루트 경로 (정적 파일용)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -650,3 +653,28 @@ async def serve_static(file_path: str):
     except Exception as e:
         logging.error(f"정적 파일 서빙 중 오류: {e}")
         return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+# =====================
+# 서버 실행
+# =====================
+if __name__ == "__main__":
+    import uvicorn
+    from config import DEFAULT_HOST, DEFAULT_PORT
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    print(f"🚀 Wafer Map Viewer 서버 시작")
+    print(f"📁 이미지 루트 디렉토리: {ROOT_DIR}")
+    print(f"🌐 서버 주소: http://{DEFAULT_HOST}:{DEFAULT_PORT}")
+    print(f"📊 썸네일 디렉토리: {THUMBNAIL_DIR}")
+    
+    uvicorn.run(
+        "main:app",
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        reload=False,
+        log_level="info"
+    )

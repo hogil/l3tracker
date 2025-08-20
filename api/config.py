@@ -1,9 +1,14 @@
 import os
 from pathlib import Path
 
-# 기본 이미지 루트 경로 (환경변수 PROJECT_ROOT 로 재정의 가능)
-# wm-811k 데이터셋 경로로 설정
-ROOT_DIR = Path(os.getenv("PROJECT_ROOT", "D:/project/data/wm-811k")).resolve()
+# ⚠️ 새로운 PC에서 사용하려면 이 경로를 수정하세요!
+# 예시: "C:/Users/사용자명/Documents/images" 또는 "/home/사용자명/images"
+ROOT_DIR = Path("D:/project/data/wm-811k").resolve()
+
+# 환경변수로 재정의 가능 (선택사항)
+if os.getenv("PROJECT_ROOT"):
+    ROOT_DIR = Path(os.getenv("PROJECT_ROOT")).resolve()
+
 THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
 THUMBNAIL_SIZE = (512, 512)
 THUMBNAIL_FORMAT = 'WEBP'

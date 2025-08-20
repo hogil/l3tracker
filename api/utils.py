@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 from functools import lru_cache
 from fastapi import HTTPException
-from .config import ROOT_DIR, SUPPORTED_EXTS, THUMBNAIL_DIR, THUMBNAIL_FORMAT
+from config import ROOT_DIR, SUPPORTED_EXTS, THUMBNAIL_DIR, THUMBNAIL_FORMAT
 from typing import Optional
 
 @lru_cache(maxsize=1000)
