@@ -479,6 +479,129 @@ async def index_status():
         n = len(FILE_INDEX)
     return {"building": INDEX_BUILDING, "ready": INDEX_READY, "count": n}
 
+# ========== CLASSIFICATION API ==========
+@app.post("/api/classes")
+async def create_class(request: Request):
+    """새 클래스 생성"""
+    try:
+        set_user_activity()
+        body = await request.json()
+        class_name = body.get("name", "").strip()
+        
+        if not class_name:
+            raise HTTPException(status_code=400, detail="Class name is required")
+        
+        # classification 폴더 생성
+        class_dir = ROOT_DIR / "classification" / class_name
+        class_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"클래스 생성: {class_name}")
+        return {"success": True, "message": f"Class '{class_name}' created successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"클래스 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/classes/delete")
+async def delete_classes(request: Request):
+    """클래스 삭제 (이미지와 함께)"""
+    try:
+        set_user_activity()
+        body = await request.json()
+        class_names = body.get("names", [])
+        
+        if not class_names:
+            raise HTTPException(status_code=400, detail="Class names are required")
+        
+        deleted_count = 0
+        for class_name in class_names:
+            class_dir = ROOT_DIR / "classification" / class_name
+            if class_dir.exists():
+                import shutil
+                shutil.rmtree(class_dir)
+                deleted_count += 1
+                logger.info(f"클래스 삭제: {class_name}")
+        
+        return {"success": True, "message": f"Deleted {deleted_count} classes"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"클래스 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/classify")
+async def classify_image(request: Request):
+    """이미지를 특정 클래스로 분류"""
+    try:
+        set_user_activity()
+        body = await request.json()
+        class_name = body.get("class_name", "").strip()
+        image_path = body.get("image_path", "").strip()
+        
+        if not class_name or not image_path:
+            raise HTTPException(status_code=400, detail="Class name and image path are required")
+        
+        # 원본 이미지 경로 확인
+        source_image = safe_resolve_path(image_path)
+        if not source_image.exists() or not source_image.is_file():
+            raise HTTPException(status_code=404, detail="Source image not found")
+        
+        # classification 폴더에 이미지 복사
+        class_dir = ROOT_DIR / "classification" / class_name
+        class_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 이미지 파일명 추출 및 복사
+        import shutil
+        target_image = class_dir / source_image.name
+        
+        # 이미 존재하는 경우 덮어쓰기
+        shutil.copy2(source_image, target_image)
+        
+        logger.info(f"이미지 분류: {image_path} -> {class_name}")
+        return {"success": True, "message": f"Image classified to class '{class_name}'"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"이미지 분류 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/thumbnail/preload")
+async def preload_thumbnails(request: Request):
+    """썸네일 프리로드 (배치 처리)"""
+    try:
+        set_user_activity()
+        body = await request.json()
+        image_paths = body.get("paths", [])
+        size = body.get("size", 512)
+        
+        if not image_paths:
+            return {"success": True, "message": "No images to preload"}
+        
+        # 썸네일 생성 작업을 백그라운드에서 실행
+        async def _preload_batch():
+            for path in image_paths:
+                try:
+                    image_path = safe_resolve_path(path)
+                    if image_path.exists() and is_supported_image(image_path):
+                        await generate_thumbnail(image_path, (size, size))
+                except Exception as e:
+                    logger.warning(f"썸네일 프리로드 실패 {path}: {e}")
+                await asyncio.sleep(0.01)  # 가벼운 양보
+        
+        asyncio.create_task(_preload_batch())
+        
+        return {"success": True, "message": f"Preloading {len(image_paths)} thumbnails"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"썸네일 프리로드 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 정적 파일
 app.mount("/static", StaticFiles(directory="."), name="static")
 
