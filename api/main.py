@@ -478,8 +478,7 @@ async def get_image(request: Request, path: str):
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
-        if not is_supported_image(image_path):
-            raise HTTPException(status_code=400, detail="Unsupported image format")
+        # 모든 파일 형식 허용 (이미지 제한 제거)
 
         st = image_path.stat()
         resp_304 = maybe_304(request, st)
