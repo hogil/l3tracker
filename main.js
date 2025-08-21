@@ -3226,9 +3226,9 @@ class WaferMapViewer {
             classes: classes.length,
             gridMode: this.gridMode
         });
-        // 기본: 모든 클래스 폴더 open
+        // 기본: 모든 클래스 폴더 closed (Wafer Map Explorer와 동일하게)
         for (const cls of classes) {
-            if (labelSelection.openFolders[cls] === undefined) labelSelection.openFolders[cls] = true;
+            if (labelSelection.openFolders[cls] === undefined) labelSelection.openFolders[cls] = false;
         }
         // --- 모든 이미지의 flat 리스트 생성 ---
         let flatImageButtons = [];
