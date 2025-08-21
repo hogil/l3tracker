@@ -894,49 +894,17 @@ class WaferMapViewer {
     /**
      * Initial application entry point.
      */
-    async init() {
+    init() {
         this._drawScheduled = false; // draw() 스케줄링 플래그
-        
-        // DOM이 완전히 로드된 후 초기화
-        await this.waitForDOM();
-        
         this.loadDirectoryContents(null, this.dom.fileExplorer);
-        await this.initClassification();
-        await this.refreshLabelExplorer();
+        this.initClassification();
+        this.refreshLabelExplorer();
         
         // 초기 실행 시 안내 메시지 표시
         this.showInitialState();
 
         // 전역 파일 인덱스 비동기 로드 (폴더 오픈 없이 검색 가능하도록)
         this.loadAllFilesIndex();
-    }
-    
-    /**
-     * DOM 요소들이 로드될 때까지 대기
-     */
-    async waitForDOM() {
-        const requiredElements = [
-            'add-class-btn',
-            'delete-class-btn',
-            'new-class-input',
-            'class-list',
-            'label-status',
-            'label-explorer-batch-label-btn',
-            'label-explorer-batch-delete-btn',
-            'label-explorer-list'
-        ];
-        
-        return new Promise((resolve) => {
-            const checkElements = () => {
-                const allLoaded = requiredElements.every(id => document.getElementById(id));
-                if (allLoaded) {
-                    resolve();
-                } else {
-                    setTimeout(checkElements, 100);
-                }
-            };
-            checkElements();
-        });
     }
 
     // =====================
@@ -2353,40 +2321,17 @@ class WaferMapViewer {
         this.selectedImagePath = null;
         this.classSelection = { selected: [], lastClicked: null };
         this.initAddLabelModal();
-        await this.refreshClassList();
-        
-        // DOM 요소 확인 및 이벤트 리스너 바인딩
+        this.refreshClassList();
         this.dom.addClassBtn = document.getElementById('add-class-btn');
         this.dom.newClassInput = document.getElementById('new-class-input');
         this.dom.classList = document.getElementById('class-list');
         this.dom.labelStatus = document.getElementById('label-status');
         this.dom.deleteClassBtn = document.getElementById('delete-class-btn');
-        
-        // 각 DOM 요소가 존재하는지 확인하고 이벤트 리스너 바인딩
-        if (this.dom.deleteClassBtn) {
-            this.dom.deleteClassBtn.addEventListener('click', () => this.deleteSelectedClasses());
-            console.log('Delete Class 버튼 이벤트 리스너 바인딩 완료');
-        } else {
-            console.error('Delete Class 버튼을 찾을 수 없습니다');
-        }
-        
-        if (this.dom.addClassBtn) {
-            this.dom.addClassBtn.addEventListener('click', () => this.addClass());
-            console.log('Add Class 버튼 이벤트 리스너 바인딩 완료');
-        } else {
-            console.error('Add Class 버튼을 찾을 수 없습니다');
-        }
-        
-        if (this.dom.newClassInput) {
-            this.dom.newClassInput.addEventListener('keydown', e => {
-                if (e.key === 'Enter') this.addClass();
-            });
-            console.log('New Class Input 이벤트 리스너 바인딩 완료');
-        } else {
-            console.error('New Class Input을 찾을 수 없습니다');
-        }
-        
-        console.log('Class Manager 초기화 완료');
+        this.dom.deleteClassBtn.addEventListener('click', () => this.deleteSelectedClasses());
+        this.dom.addClassBtn.addEventListener('click', () => this.addClass());
+        this.dom.newClassInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') this.addClass();
+        });
     }
 
     async refreshClassList() {
@@ -2394,7 +2339,11 @@ class WaferMapViewer {
         const scrollTop = container ? container.scrollTop : 0;
         const res = await fetch('/api/classes');
         const data = await res.json();
-        const classes = Array.isArray(data.classes) ? data.classes.sort() : [];
+        // 이름 순으로 정렬 (대소문자 구분 없이)
+        const classes = Array.isArray(data.classes) ? data.classes.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())) : [];
+        
+        // 기존 버튼들을 저장 (삭제 전에)
+        const existingButtons = Array.from(container.querySelectorAll('button'));
         
         // Class Manager frame 클릭 시 선택 해제
         const classFrame = document.querySelector('.classification-frame');
@@ -2411,13 +2360,11 @@ class WaferMapViewer {
             });
         }
         
-        // 기존 버튼들과 새 클래스 목록 비교하여 부분 갱신
-        const existingButtons = Array.from(container.children);
-        const existingClasses = existingButtons.map(btn => btn.textContent);
+        // 기존 버튼들 모두 제거하고 새로 생성 (정렬 문제 해결)
+        container.innerHTML = '';
         
-        // 새로 추가된 클래스만 버튼 생성
-        const newClasses = classes.filter(cls => !existingClasses.includes(cls));
-        newClasses.forEach(cls => {
+        // 모든 클래스에 대해 버튼 생성
+        classes.forEach(cls => {
             const btn = document.createElement('button');
             btn.textContent = cls;
             btn.className = 'class-btn' + (this.selectedClass === cls ? ' selected' : '');
@@ -2443,11 +2390,19 @@ class WaferMapViewer {
                         if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
                         for (const idx of this.gridSelectedIdxs) {
                             const path = this.selectedImages[idx];
-                            await fetch('/api/classify', {
+                            const requestBody = { class_name: this.selectedClass, image_path: path };
+                            console.log('분류 요청 전송:', requestBody);
+                            
+                            const response = await fetch('/api/classify', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ class_name: this.selectedClass, image_path: path })
+                                body: JSON.stringify(requestBody)
                             });
+                            
+                            if (!response.ok) {
+                                const errorText = await response.text();
+                                console.error('분류 실패:', response.status, errorText);
+                            }
                         }
                         // 버튼 색상 피드백
                         const originalBg = btn.style.background;
@@ -2455,6 +2410,8 @@ class WaferMapViewer {
                         setTimeout(() => {
                             btn.style.background = originalBg;
                             this.refreshLabelExplorer();
+                            // 추가로 강제 새로고침
+                            setTimeout(() => this.refreshLabelExplorer(), 100);
                         }, 200);
                         return;
                     }
@@ -2468,6 +2425,8 @@ class WaferMapViewer {
                         setTimeout(() => {
                             btn.style.background = originalBg;
                             this.refreshLabelExplorer();
+                            // 추가로 강제 새로고침
+                            setTimeout(() => this.refreshLabelExplorer(), 100);
                         }, 200);
                         return;
                     } else {
@@ -2504,6 +2463,7 @@ class WaferMapViewer {
         });
         
         // 삭제된 클래스의 버튼 제거
+        const existingClasses = existingButtons.map(btn => btn.textContent);
         const deletedClasses = existingClasses.filter(cls => !classes.includes(cls));
         deletedClasses.forEach(cls => {
             const btn = existingButtons.find(b => b.textContent === cls);
@@ -2532,6 +2492,17 @@ class WaferMapViewer {
         const names = this.dom.newClassInput.value.split(',').map(s => s.trim()).filter(Boolean);
         if (!names.length) return;
         
+        // 클래스명 유효성 검사
+        const invalidNames = names.filter(name => {
+            // 한글 자모나 특수문자 체크
+            return /[^\x20-\x7E]/.test(name) || !/^[A-Za-z0-9_-]+$/.test(name);
+        });
+        
+        if (invalidNames.length > 0) {
+            alert(`다음 클래스명이 유효하지 않습니다: ${invalidNames.join(', ')}\n\n클래스명은 A-Z, a-z, 0-9, _, - 만 사용 가능합니다.`);
+            return;
+        }
+        
         // 즉시 버튼 피드백 제공
         const addBtn = this.dom.addClassBtn;
         const originalText = addBtn?.textContent || 'Add Class';
@@ -2541,25 +2512,87 @@ class WaferMapViewer {
             addBtn.style.opacity = '0.6';
         }
         
+        const successfulClasses = []; // 성공한 클래스들을 추적
+        
         try {
             console.log(`Adding classes: ${names.join(', ')}`);
             
             for (const name of names) {
-                await fetch('/api/classes', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
-                });
+                try {
+                    const response = await fetch('/api/classes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    
+                    if (!response.ok) {
+                        console.error(`클래스 '${name}' 추가 실패: HTTP ${response.status}`);
+                        continue; // 실패한 클래스는 건너뛰고 계속 진행
+                    }
+                    
+                    const result = await response.json();
+                    if (!result.success) {
+                        console.error(`클래스 '${name}' 추가 실패: ${result.message || 'Unknown error'}`);
+                        continue; // 실패한 클래스는 건너뛰고 계속 진행
+                    }
+                    
+                    console.log(`클래스 '${name}' 추가 성공:`, result);
+                    successfulClasses.push(name); // 성공한 클래스 추가
+                    
+                    // API 응답에서 refresh_required 확인 후 즉시 Label Explorer 강제 새로고침
+                    if (result.refresh_required) {
+                        console.log(`클래스 '${name}' 생성 완료 - Label Explorer 즉시 강제 새로고침`);
+                        await this.refreshLabelExplorer();
+                    }
+                } catch (error) {
+                    console.error(`클래스 '${name}' 추가 중 오류 발생:`, error);
+                    continue; // 오류 발생한 클래스는 건너뛰고 계속 진행
+                }
             }
             
             this.dom.newClassInput.value = '';
             await this.refreshClassList();
             await this.refreshLabelExplorer();
             
-            console.log(`Successfully added ${names.length} classes`);
+            // Label Explorer 강제 새로고침 (클래스 생성 후)
+            setTimeout(() => {
+                console.log('클래스 생성 후 Label Explorer 강제 새로고침');
+                this.refreshLabelExplorer();
+            }, 100);
+            
+            // 추가 지연 새로고침 (500ms)
+            setTimeout(() => {
+                console.log('클래스 생성 후 Label Explorer 추가 새로고침 (500ms)');
+                this.refreshLabelExplorer();
+            }, 500);
+            
+            // 최종 확인 새로고침 (1000ms)
+            setTimeout(() => {
+                console.log('클래스 생성 후 Label Explorer 최종 확인 새로고침 (1000ms)');
+                this.refreshLabelExplorer();
+            }, 1000);
+            
+            // 성공한 클래스 수 계산
+            const successCount = successfulClasses.length;
+            console.log(`클래스 추가 결과: 요청 ${names.length}개, 성공 ${successCount}개`);
+            
+            if (successCount > 0) {
+                console.log(`성공적으로 ${successCount}개 클래스를 추가했습니다: ${successfulClasses.join(', ')}`);
+                // 성공 메시지 표시 (선택사항)
+                // alert(`성공적으로 ${successCount}개 클래스를 추가했습니다: ${successfulClasses.join(', ')}`);
+            } else {
+                console.log('추가된 클래스가 없습니다');
+                alert('추가된 클래스가 없습니다. 클래스명을 확인해주세요.');
+            }
         } catch (error) {
-            console.error('클래스 추가 실패:', error);
-            alert('클래스 추가에 실패했습니다.');
+            console.error('클래스 추가 중 예상치 못한 오류 발생:', error);
+            // 에러가 발생해도 성공한 클래스가 있으면 성공으로 처리
+            if (successfulClasses && successfulClasses.length > 0) {
+                console.log(`일부 클래스 추가 성공: ${successfulClasses.join(', ')}`);
+                // alert(`일부 클래스 추가 성공: ${successfulClasses.join(', ')}`);
+            } else {
+                alert('클래스 추가 중 오류가 발생했습니다. 콘솔을 확인해주세요.');
+            }
         } finally {
             // 버튼 상태 복원
             if (addBtn) {
@@ -2584,10 +2617,13 @@ class WaferMapViewer {
             this.refreshLabelExplorer();
             this.refreshClassList();
         } else if (this.selectedClass && this.selectedImagePath) {
+            const requestBody = { class_name: this.selectedClass, image_path: this.selectedImagePath };
+            console.log('단일 이미지 분류 요청 전송:', requestBody);
+            
             const res = await fetch('/api/classify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ class_name: this.selectedClass, image_path: this.selectedImagePath })
+                body: JSON.stringify(requestBody)
             });
             if (res.ok) {
                 // Explorer에서 classification/클래스 폴더 자동 오픈
@@ -2597,6 +2633,10 @@ class WaferMapViewer {
                     classSummary.parentElement.open = true;
                     this.loadDirectoryContents(`classification/${this.selectedClass}`, classSummary.nextElementSibling);
                 }
+                
+                // UI 새로고침
+                await this.refreshLabelExplorer();
+                await this.refreshClassList();
             }
         }
     }
@@ -2625,11 +2665,26 @@ class WaferMapViewer {
         
         console.log(`Deleting classes: ${names.join(', ')}`);
         
-        await fetch('/api/classes/delete', {
+        const response = await fetch('/api/classes/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ names })
         });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.message || 'Failed to delete classes');
+        }
+        
+        // API 응답에서 refresh_required 확인 후 즉시 Label Explorer 강제 새로고침
+        if (result.refresh_required) {
+            console.log('클래스 삭제 완료 - Label Explorer 즉시 강제 새로고침');
+            await this.refreshLabelExplorer();
+        }
         
         // 텍스트박스도 클리어
         this.dom.newClassInput.value = '';
@@ -2641,35 +2696,36 @@ class WaferMapViewer {
         await this.refreshLabelExplorer();
         this.loadDirectoryContents(null, this.dom.fileExplorer);
         
+        // Label Explorer 강제 새로고침 (클래스 삭제 후)
+        setTimeout(() => {
+            console.log('클래스 삭제 후 Label Explorer 강제 새로고침');
+            this.refreshLabelExplorer();
+        }, 100);
+        
+        // 추가 지연 새로고침 (500ms)
+        setTimeout(() => {
+            console.log('클래스 삭제 후 Label Explorer 추가 새로고침 (500ms)');
+            this.refreshLabelExplorer();
+        }, 500);
+        
+        // 최종 확인 새로고침 (1000ms)
+        setTimeout(() => {
+            console.log('클래스 삭제 후 Label Explorer 최종 확인 새로고침 (1000ms)');
+            this.refreshLabelExplorer();
+        }, 1000);
+        
         console.log(`Successfully deleted ${names.length} classes`);
     }
 
     // --- ADD LABEL MODAL ---
     initAddLabelModal() {
         const modal = document.getElementById('add-label-modal');
-        if (!modal) {
-            console.error('Add Label Modal을 찾을 수 없습니다');
-            return;
-        }
-        
         const closeBtn = modal.querySelector('.modal-close');
         const cancelBtn = document.getElementById('modal-cancel');
         const addBtn = document.getElementById('modal-add-label');
         const removeBtn = document.getElementById('modal-remove-labels');
         const classSelect = document.getElementById('modal-class-select');
         const newClassInput = document.getElementById('modal-new-class-input');
-        
-        // 필수 DOM 요소들이 존재하는지 확인
-        if (!closeBtn || !cancelBtn || !addBtn || !classSelect || !newClassInput) {
-            console.error('Add Label Modal의 필수 요소들을 찾을 수 없습니다:', {
-                closeBtn: !!closeBtn,
-                cancelBtn: !!cancelBtn,
-                addBtn: !!addBtn,
-                classSelect: !!classSelect,
-                newClassInput: !!newClassInput
-            });
-            return;
-        }
         
         // 선택된 라벨 목록 초기화
         this.selectedLabelsForRemoval = [];
@@ -2811,7 +2867,8 @@ class WaferMapViewer {
             await this.loadExistingLabels(existingLabelsList, selectedImages);
             
             // UI 업데이트
-            this.updateLabelExplorerContent();
+            await this.refreshLabelExplorer();
+            await this.refreshClassList();
             
         } catch (error) {
             console.error('Failed to remove labels:', error);
@@ -2846,7 +2903,8 @@ class WaferMapViewer {
         try {
             const res = await fetch('/api/classes');
             const data = await res.json();
-            const classes = (data.classes || []).sort();
+            // 이름 순으로 정렬 (대소문자 구분 없이)
+            const classes = (data.classes || []).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             
             classSelect.innerHTML = '<option value="">-- Select a class --</option>';
             classes.forEach(cls => {
@@ -2881,7 +2939,8 @@ class WaferMapViewer {
             // 모든 클래스에서 선택된 이미지들의 라벨 찾기
             const res = await fetch('/api/classes');
             const data = await res.json();
-            const classes = (data.classes || []).sort();
+            // 이름 순으로 정렬 (대소문자 구분 없이)
+            const classes = (data.classes || []).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
             
             const existingLabels = [];
             
@@ -3085,16 +3144,16 @@ class WaferMapViewer {
             // selectedAction === 'add-all'인 경우는 모든 이미지에 추가 (기본 동작)
             
             // 처리할 이미지들에 라벨 추가
-            const promises = imagesToProcess.map(imagePath =>
-                fetch('/api/classify', {
+            const promises = imagesToProcess.map(imagePath => {
+                const requestBody = { class_name: finalClassName, image_path: imagePath };
+                console.log('모달에서 라벨 추가 요청 전송:', requestBody);
+                
+                return fetch('/api/classify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        class_name: finalClassName,
-                        image_path: imagePath
-                    })
-                })
-            );
+                    body: JSON.stringify(requestBody)
+                });
+            });
             
             await Promise.all(promises);
             
@@ -3113,9 +3172,16 @@ class WaferMapViewer {
             // 모달 닫기
             this.closeAddLabelModal();
             
-            // UI 업데이트
-            this.updateLabelExplorerContent();
+            // UI 업데이트 - 강제 새로고침
+            console.log('라벨 추가 완료, UI 새로고침 시작...');
+            await this.refreshLabelExplorer();
             await this.refreshClassList();
+            
+            // 추가로 Label Explorer 강제 새로고침
+            setTimeout(() => {
+                console.log('Label Explorer 강제 새로고침 실행');
+                this.refreshLabelExplorer();
+            }, 100);
             
         } catch (error) {
             console.error('Failed to add label:', error);
@@ -3127,30 +3193,33 @@ class WaferMapViewer {
     async refreshLabelExplorer() {
         const container = document.getElementById('label-explorer-list');
         if (!container) {
-            console.error('Label Explorer 컨테이너를 찾을 수 없습니다');
+            console.warn('Label Explorer container not found');
             return;
         }
         
-        const scrollTop = container.scrollTop || 0;
+        const scrollTop = container.scrollTop;
         
         // 기존 내용을 임시로 저장하여 스크롤 위치 유지
         const existingContent = container.innerHTML;
         
+        console.log('Label Explorer 새로고침 시작...');
+        
         const batchLabelBtn = document.getElementById('label-explorer-batch-label-btn');
         const batchDeleteBtn = document.getElementById('label-explorer-batch-delete-btn');
         
-        if (!batchLabelBtn || !batchDeleteBtn) {
-            console.error('Label Explorer 버튼들을 찾을 수 없습니다:', {
-                batchLabelBtn: !!batchLabelBtn,
-                batchDeleteBtn: !!batchDeleteBtn
-            });
-            return;
-        }
-        const res = await fetch('/api/classes');
-        const data = await res.json();
-        const classes = Array.isArray(data.classes) ? data.classes.sort() : [];
-        if (!this.labelSelection) this.labelSelection = { selected: [], lastClicked: null, openFolders: {}, selectedClasses: [] };
-        const labelSelection = this.labelSelection;
+        try {
+            const res = await fetch('/api/classes');
+            const data = await res.json();
+            
+            if (!data.success) {
+                console.error('클래스 목록 조회 실패:', data);
+                return;
+            }
+            
+            // 이름 순으로 정렬 (대소문자 구분 없이)
+            const classes = Array.isArray(data.classes) ? data.classes.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())) : [];
+            if (!this.labelSelection) this.labelSelection = { selected: [], lastClicked: null, openFolders: {}, selectedClasses: [] };
+            const labelSelection = this.labelSelection;
         
         console.log('Label Explorer 초기화:', {
             labelSelection: labelSelection,
@@ -3234,6 +3303,7 @@ class WaferMapViewer {
         };
         // Delete Label 버튼: 항상 활성화
         batchDeleteBtn.disabled = false;
+
         batchDeleteBtn.onclick = async () => {
             if (labelSelection.selectedClasses.length === 0 && labelSelection.selected.length === 0) {
                 alert('삭제할 라벨을 선택해주세요.');
@@ -3300,6 +3370,16 @@ class WaferMapViewer {
         
         // 스크롤 위치 복원
         if (container) container.scrollTop = scrollTop;
+        
+        console.log('Label Explorer 새로고침 완료');
+        } catch (error) {
+            console.error('Label Explorer 새로고침 실패:', error);
+            // 에러 발생 시 기존 내용 복원
+            if (container) {
+                container.innerHTML = existingContent;
+                container.scrollTop = scrollTop;
+            }
+        }
     }
 
     renderLabelExplorerContent(container, classes, classToImgList, labelSelection) {

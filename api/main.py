@@ -1,32 +1,36 @@
 """
-L3Tracker - Wafer Map Viewer API (Config-driven, Max-Throughput)
-- config.py로 모든 주요 파라미터 외부화
-- 파일명 대소문자 무시 부분일치 검색(모든 하위폴더)
-- 유저 요청 최우선(요청 중 백그라운드 즉시 양보/일시정지)
-- 폴더 리스트: os.scandir + LRU 캐시
-- 이미지/썸네일: ETag(If-None-Match) + 304 Not Modified + 강한 캐시
-- 썸네일: ThreadPoolExecutor + 동시 생성 제한(config.THUMBNAIL_SEM)
-- 인덱스: 백그라운드 구축(양보), 인메모리 우선 검색(offset/limit)
+L3Tracker - Wafer Map Viewer API (No-Restart Live Refresh for Classes & Labels)
+- 라벨: labels.json mtime 감지 → stale 시 자동 재로딩(멀티 워커 동기화)
+- 디렉터리 캐시: 변경 즉시 무효화(list_dir_fast LRU)
+- 클래스 삭제 시: 해당 class 라벨을 전 이미지에서 제거(일관성 유지)
+- 라벨/클래스 라우트: 항상 no-store 헤더(브라우저 캐시 방지)
+- 라벨/클래스 관련 요청 도착 시: classification 폴더 mtime 변경 감지 → 라벨과 즉시 동기화
+
+주의: config.py는 그대로 사용
 """
 
 import os
+import re
+import json
 import time
+import shutil
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Set, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 from collections import OrderedDict
 from threading import RLock
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Path as PathParam
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel, Field
 from PIL import Image
 
-import api.config as config
+from . import config
 
 # ========== 로깅 ==========
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,6 +54,9 @@ THUMB_STAT_CACHE_CAPACITY = config.THUMB_STAT_CACHE_CAPACITY
 
 SKIP_DIRS = {d.strip() for d in config.SKIP_DIRS if d.strip()}
 
+LABELS_DIR = config.LABELS_DIR
+LABELS_FILE = config.LABELS_FILE
+
 # ========== 스레드풀/세마포어 ==========
 IO_POOL = ThreadPoolExecutor(max_workers=IO_THREADS)
 THUMBNAIL_SEM = asyncio.Semaphore(THUMBNAIL_SEM_SIZE)
@@ -63,6 +70,14 @@ INDEX_READY = False
 # rel_path -> {"name_lower": str, "size": int, "modified": float}
 FILE_INDEX: Dict[str, Dict[str, Any]] = {}
 FILE_INDEX_LOCK = RLock()
+
+# 라벨: { rel_path(str): ["label1", "label2", ...] }
+LABELS: Dict[str, List[str]] = {}
+LABELS_LOCK = RLock()
+LABELS_MTIME: float = 0.0  # labels.json 최신 mtime 기록
+
+# classification 폴더 변경 감지용
+CLASSES_MTIME: float = 0.0
 
 # ========== 캐시 ==========
 class LRUCache:
@@ -86,6 +101,14 @@ class LRUCache:
             self._cache[key] = value
             if len(self._cache) > self.capacity:
                 self._cache.popitem(last=False)
+
+    def delete(self, key: str):
+        with self._lock:
+            self._cache.pop(key, None)
+
+    def clear(self):
+        with self._lock:
+            self._cache.clear()
 
 DIRLIST_CACHE = LRUCache(DIRLIST_CACHE_SIZE)
 
@@ -121,7 +144,7 @@ class TTLCache:
 THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 
 # ========== FastAPI ==========
-app = FastAPI(title="L3Tracker API", version="2.0.0")
+app = FastAPI(title="L3Tracker API", version="2.4.0")
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
@@ -155,6 +178,145 @@ def safe_resolve_path(path: Optional[str]) -> Path:
 def compute_etag(st) -> str:
     return f'W/"{st.st_mtime_ns:x}-{st.st_size:x}"'
 
+def relkey_from_any_path(any_path: str) -> str:
+    abs_path = safe_resolve_path(any_path)
+    rel = str(abs_path.relative_to(ROOT_DIR)).replace("\\", "/")
+    return rel
+
+# ===== 라벨/클래스 동기화 유틸 =====
+def _labels_reload_if_stale():
+    """다른 워커가 labels.json을 갱신했으면 이 워커도 즉시 반영"""
+    global LABELS_MTIME
+    try:
+        st = LABELS_FILE.stat()
+    except FileNotFoundError:
+        return
+    if st.st_mtime > LABELS_MTIME:
+        _labels_load()
+
+def _dircache_invalidate(path: Path):
+    """list_dir_fast 캐시 무효화(변경 경로 및 resolve 버전 동시 제거)"""
+    try:
+        DIRLIST_CACHE.delete(str(path))
+    except Exception:
+        pass
+    try:
+        DIRLIST_CACHE.delete(str(path.resolve()))
+    except Exception:
+        pass
+
+def _classification_dir() -> Path:
+    return ROOT_DIR / "classification"
+
+def _classes_stat_mtime() -> float:
+    try:
+        return _classification_dir().stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+
+def _scan_classes() -> set:
+    classes = set()
+    d = _classification_dir()
+    if not d.exists():
+        return classes
+    try:
+        with os.scandir(d) as it:
+            for e in it:
+                if e.is_dir(follow_symlinks=False):
+                    classes.add(e.name)
+    except FileNotFoundError:
+        pass
+    return classes
+
+def _sync_labels_with_classes(existing_classes: set) -> int:
+    """현재 파일시스템에 존재하지 않는 클래스 라벨들을 전 이미지에서 제거"""
+    removed = 0
+    with LABELS_LOCK:
+        for rel, labs in list(LABELS.items()):
+            new_labs = [x for x in labs if x in existing_classes]
+            if new_labs != labs:
+                if new_labs:
+                    LABELS[rel] = new_labs
+                else:
+                    LABELS.pop(rel, None)
+                removed += 1
+    if removed:
+        _labels_save()
+    return removed
+
+def _sync_labels_if_classes_changed():
+    """classification 폴더 mtime이 바뀌었으면 라벨을 파일시스템과 동기화"""
+    global CLASSES_MTIME
+    cur = _classes_stat_mtime()
+    if cur > CLASSES_MTIME:
+        CLASSES_MTIME = cur
+        classes = _scan_classes()
+        cleaned = _sync_labels_with_classes(classes)
+        if cleaned:
+            logger.info(f"[SYNC] classes 변경 감지 → 라벨 {cleaned}개 이미지에서 정리됨")
+
+def _remove_label_from_all_images(label_name: str) -> int:
+    """LABELS에서 지정 라벨을 모든 이미지에서 제거, 빈 항목은 삭제. 제거된 이미지 수 반환."""
+    removed = 0
+    with LABELS_LOCK:
+        for rel, labs in list(LABELS.items()):
+            if label_name in labs:
+                new_labs = [x for x in labs if x != label_name]
+                if new_labs:
+                    LABELS[rel] = new_labs
+                else:
+                    LABELS.pop(rel, None)
+                removed += 1
+                logger.info(f"라벨 제거: {rel}에서 '{label_name}' 제거됨")
+    
+    if removed:
+        _labels_save()
+        logger.info(f"라벨 완전 삭제: '{label_name}' 라벨을 {removed}개 이미지에서 제거하고 저장됨")
+    
+    return removed
+
+# ========== 라벨 파일 I/O ==========
+def _labels_load():
+    global LABELS, LABELS_MTIME
+    if not LABELS_FILE.exists():
+        with LABELS_LOCK:
+            LABELS = {}
+        LABELS_MTIME = 0.0
+        return
+    try:
+        with LABELS_LOCK:
+            with open(LABELS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            fixed: Dict[str, List[str]] = {}
+            for k, v in data.items():
+                if isinstance(v, list):
+                    fixed[k] = [str(x) for x in v]
+            LABELS = fixed
+        try:
+            LABELS_MTIME = LABELS_FILE.stat().st_mtime
+        except Exception:
+            LABELS_MTIME = time.time()
+        logger.info(f"라벨 로드: {len(LABELS)}개 이미지 (mtime={LABELS_MTIME})")
+    except Exception as e:
+        logger.error(f"라벨 로드 실패: {e}")
+
+def _labels_save():
+    global LABELS_MTIME
+    try:
+        LABELS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = LABELS_FILE.with_suffix(".json.tmp")
+        with LABELS_LOCK:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(LABELS, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, LABELS_FILE)
+        try:
+            LABELS_MTIME = LABELS_FILE.stat().st_mtime
+        except Exception:
+            LABELS_MTIME = time.time()
+    except Exception as e:
+        logger.error(f"라벨 저장 실패: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save labels")
+
 # ========== 유저 우선 ==========
 def set_user_activity():
     global USER_ACTIVITY_FLAG, BACKGROUND_TASKS_PAUSED
@@ -177,12 +339,22 @@ async def user_priority_middleware(request: Request, call_next):
         asyncio.create_task(delayed_background_resume())
     return response
 
+# 라벨/클래스 응답은 항상 캐시 금지
+@app.middleware("http")
+async def no_store_for_labels_and_classes(request: Request, call_next):
+    response = await call_next(request)
+    p = request.url.path
+    if p.startswith("/api/labels") or p.startswith("/api/classes"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 async def delayed_background_resume():
-    await asyncio.sleep(1.5)  # 짧게
+    await asyncio.sleep(1.5)
     global BACKGROUND_TASKS_PAUSED
     BACKGROUND_TASKS_PAUSED = False
     clear_user_activity()
-    logger.debug("백그라운드 재개")
 
 # ========== 디렉터리 나열 ==========
 def list_dir_fast(target: Path) -> List[Dict[str, str]]:
@@ -221,14 +393,11 @@ async def build_file_index_background():
         global INDEX_READY
         start = time.time()
         for root, dirs, files in os.walk(ROOT_DIR):
-            # 유저 요청 시 자주 양보
             if BACKGROUND_TASKS_PAUSED or USER_ACTIVITY_FLAG:
                 time.sleep(0.1)
-            # 폴더 프룬
             for skip in list(SKIP_DIRS):
                 if skip in dirs:
                     dirs.remove(skip)
-
             for fn in files:
                 ext = os.path.splitext(fn)[1].lower()
                 if ext not in SUPPORTED_EXTENSIONS:
@@ -267,11 +436,9 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     cached = THUMB_STAT_CACHE.get(key)
     if cached:
         return thumb
-
     if thumb.exists() and thumb.stat().st_size > 0:
         THUMB_STAT_CACHE.set(key, True)
         return thumb
-
     async with THUMBNAIL_SEM:
         if thumb.exists() and thumb.stat().st_size > 0:
             THUMB_STAT_CACHE.set(key, True)
@@ -285,12 +452,11 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
 # ========== 공통: ETag/304 ==========
 def maybe_304(request: Request, st) -> Optional[Response]:
     etag = compute_etag(st)
-    inm = request.headers.get("if-none-match")
-    if inm and inm == etag:
+    if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=604800, immutable"})
     return None
 
-# ========== 엔드포인트 ==========
+# ========== 엔드포인트: 파일/이미지/검색 ==========
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None):
     try:
@@ -298,8 +464,7 @@ async def get_files(path: Optional[str] = None):
         target = safe_resolve_path(path)
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
-        items = list_dir_fast(target)
-        return {"success": True, "items": items}
+        return {"success": True, "items": list_dir_fast(target)}
     except HTTPException:
         raise
     except Exception as e:
@@ -320,7 +485,6 @@ async def get_image(request: Request, path: str):
         resp_304 = maybe_304(request, st)
         if resp_304:
             return resp_304
-
         headers = {"Cache-Control": "public, max-age=86400, immutable", "ETag": compute_etag(st)}
         return FileResponse(image_path, headers=headers)
     except HTTPException:
@@ -346,7 +510,6 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
         resp_304 = maybe_304(request, st)
         if resp_304:
             return resp_304
-
         headers = {"Cache-Control": "public, max-age=604800, immutable", "ETag": compute_etag(st)}
         return FileResponse(thumb, headers=headers)
     except HTTPException:
@@ -355,50 +518,23 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
         logger.exception(f"썸네일 제공 실패: {e}")
         return await get_image(request, path)
 
-@app.get("/api/classes")
-async def get_classes():
-    try:
-        set_user_activity()
-        classification_dir = ROOT_DIR / "classification"
-        if not classification_dir.exists():
-            return {"success": True, "classes": []}
-        classes = []
-        try:
-            with os.scandir(classification_dir) as it:
-                for entry in it:
-                    if entry.is_dir(follow_symlinks=False):
-                        classes.append(entry.name)
-        except FileNotFoundError:
-            pass
-        classes.sort()
-        return {"success": True, "classes": classes}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"분류 클래스 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/api/search")
 async def search_files(
     q: str = Query(..., description="파일명 검색(대소문자 무시, 부분일치)"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0)
 ):
-    """인덱스 우선 + 디스크 스캔 보강 (offset/limit 지원)"""
     try:
         set_user_activity()
         query = (q or "").strip().lower()
         if not query:
             return {"success": True, "results": [], "offset": offset, "limit": limit}
 
-        # 결과 버킷은 offset+limit까지만 모으고 마지막에 슬라이싱
         goal = offset + limit
         bucket: List[str] = []
 
-        # 1) 인덱스 스냅샷
         with FILE_INDEX_LOCK:
             items = list(FILE_INDEX.items())
-
         if items:
             for rel, meta in items:
                 if query in meta["name_lower"]:
@@ -406,11 +542,9 @@ async def search_files(
                     if len(bucket) >= goal:
                         break
 
-        # 2) 부족하면 디스크 스캔
         if len(bucket) < goal:
             seen = set(bucket)
             need = goal - len(bucket)
-
             def _scan():
                 nonlocal need
                 for root, dirs, files in os.walk(ROOT_DIR):
@@ -433,7 +567,6 @@ async def search_files(
                             continue
                         seen.add(rel)
                         bucket.append(rel)
-                        # 인덱스 즉시 보강
                         try:
                             st = full.stat()
                             rec = {"name_lower": low, "size": st.st_size, "modified": st.st_mtime}
@@ -444,12 +577,10 @@ async def search_files(
                         need -= 1
                         if need <= 0:
                             return
-                    time.sleep(0.001)  # 가벼운 양보
-
+                    time.sleep(0.001)
             if need > 0:
                 await asyncio.get_running_loop().run_in_executor(IO_POOL, _scan)
 
-        # 슬라이싱
         results = bucket[offset: offset + limit]
         return {"success": True, "results": results, "offset": offset, "limit": limit}
     except HTTPException:
@@ -460,6 +591,7 @@ async def search_files(
 
 @app.get("/api/files/all")
 async def get_all_files():
+    """전체 파일 목록 조회 (인덱스 기반)"""
     try:
         set_user_activity()
         with FILE_INDEX_LOCK:
@@ -473,136 +605,469 @@ async def get_all_files():
         logger.exception(f"전체 파일 목록 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/index/status")
-async def index_status():
-    with FILE_INDEX_LOCK:
-        n = len(FILE_INDEX)
-    return {"building": INDEX_BUILDING, "ready": INDEX_READY, "count": n}
+# ========== 엔드포인트: 클래스 ==========
+_CLASS_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
-# ========== CLASSIFICATION API ==========
-@app.post("/api/classes")
-async def create_class(request: Request):
-    """새 클래스 생성"""
+class CreateClassReq(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+@app.get("/api/classes")
+async def get_classes():
+    """분류 클래스 목록 조회 (항상 파일시스템 스캔)"""
     try:
         set_user_activity()
-        body = await request.json()
-        class_name = body.get("name", "").strip()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        classification_dir = _classification_dir()
+        if not classification_dir.exists():
+            return {"success": True, "classes": []}
+
+        classes = []
+        try:
+            with os.scandir(classification_dir) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        classes.append(entry.name)
+        except FileNotFoundError:
+            pass
+
+        classes = sorted(classes, key=str.lower)
+        return {"success": True, "classes": classes}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"분류 클래스 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/classes")
+async def create_class(req: CreateClassReq):
+    """클래스 생성: classification/<class_name> 디렉토리 생성"""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        name = req.name.strip()
         
-        if not class_name:
-            raise HTTPException(status_code=400, detail="Class name is required")
+        # 빈 문자열이나 공백만 있는 경우 체크
+        if not name or name.isspace():
+            raise HTTPException(status_code=400, detail="클래스명이 비어있습니다")
         
-        # classification 폴더 생성
-        class_dir = ROOT_DIR / "classification" / class_name
-        class_dir.mkdir(parents=True, exist_ok=True)
+        # 한글 자모나 특수문자 체크
+        if any(ord(char) < 32 or ord(char) > 126 for char in name):
+            raise HTTPException(status_code=400, detail="클래스명에 특수문자나 한글 자모를 사용할 수 없습니다 (A-Z, a-z, 0-9, _, - 만 사용 가능)")
         
-        logger.info(f"클래스 생성: {class_name}")
-        return {"success": True, "message": f"Class '{class_name}' created successfully"}
+        if not _CLASS_NAME_RE.match(name):
+            raise HTTPException(status_code=400, detail="클래스명 형식이 올바르지 않습니다 (A-Z, a-z, 0-9, _, - 만 사용 가능)")
         
+        # 길이 체크
+        if len(name) > 50:
+            raise HTTPException(status_code=400, detail="클래스명이 너무 깁니다 (최대 50자)")
+        class_dir = _classification_dir() / name
+        if class_dir.exists():
+            raise HTTPException(status_code=409, detail="Class already exists")
+        class_dir.mkdir(parents=True, exist_ok=False)
+
+        # 즉시 라벨 동기화 (새 클래스 생성 시)
+        _sync_labels_if_classes_changed()
+        
+        # mtime 변화로 동기화되지만, 즉시 목록 반영을 위해 캐시 무효화
+        _dircache_invalidate(_classification_dir())
+        
+        # 클래스 생성 후 즉시 Label Explorer 강제 새로고침
+        logger.info(f"클래스 '{name}' 생성 완료 - Label Explorer 강제 새로고침 필요")
+        
+        # 성공 응답 반환
+        return {
+            "success": True, 
+            "class": name, 
+            "refresh_required": True,
+            "message": f"클래스 '{name}'이 성공적으로 생성되었습니다"
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"클래스 생성 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/classes/delete")
-async def delete_classes(request: Request):
-    """클래스 삭제 (이미지와 함께)"""
+@app.delete("/api/classes/{class_name}")
+async def delete_class(
+    class_name: str = PathParam(..., min_length=1, max_length=128),
+    force: bool = Query(False, description="True면 내용 포함 통째 삭제")
+):
+    """클래스 삭제: 기본은 빈 폴더만 삭제, force=True면 내용 포함 삭제 + 라벨 전역 정리"""
     try:
         set_user_activity()
-        body = await request.json()
-        class_names = body.get("names", [])
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        if not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class_name")
+        class_dir = _classification_dir() / class_name
+        if not class_dir.exists() or not class_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Class not found")
+
+        if force:
+            shutil.rmtree(class_dir)
+            logger.info(f"클래스 삭제(force): {class_name}")
+        else:
+            if any(class_dir.iterdir()):
+                raise HTTPException(status_code=409, detail="Class directory not empty")
+            class_dir.rmdir()
+            logger.info(f"클래스 삭제: {class_name}")
+
+        # 라벨 전역에서 이 클래스명 제거 (즉시 일관성)
+        removed_cnt = _remove_label_from_all_images(class_name)
+        if removed_cnt:
+            logger.info(f"라벨 정리: class='{class_name}' 라벨을 {removed_cnt}개 이미지에서 제거")
         
-        if not class_names:
-            raise HTTPException(status_code=400, detail="Class names are required")
+        # 강제로 라벨 리로드하여 다른 워커와 동기화
+        _labels_load()
+
+        # 캐시 무효화 및 mtime 반영
+        _dircache_invalidate(_classification_dir())
         
-        deleted_count = 0
-        for class_name in class_names:
-            class_dir = ROOT_DIR / "classification" / class_name
-            if class_dir.exists():
-                import shutil
-                shutil.rmtree(class_dir)
-                deleted_count += 1
-                logger.info(f"클래스 삭제: {class_name}")
+        # 클래스 삭제 후 즉시 Label Explorer 강제 새로고침
+        logger.info(f"클래스 '{class_name}' 삭제 완료 - Label Explorer 강제 새로고침 필요")
         
-        return {"success": True, "message": f"Deleted {deleted_count} classes"}
-        
+        return {"success": True, "deleted": class_name, "force": force, "labels_cleaned": removed_cnt, "refresh_required": True}
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"클래스 삭제 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/classify")
-async def classify_image(request: Request):
-    """이미지를 특정 클래스로 분류"""
+class DeleteClassesReq(BaseModel):
+    names: List[str] = Field(..., min_items=1, description="삭제할 클래스명 목록")
+
+@app.post("/api/classes/delete")
+async def delete_classes(req: DeleteClassesReq):
+    """여러 클래스 삭제 (내용 포함 통째 삭제) + 라벨 전역 정리"""
     try:
         set_user_activity()
-        body = await request.json()
-        class_name = body.get("class_name", "").strip()
-        image_path = body.get("image_path", "").strip()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        if not req.names:
+            raise HTTPException(status_code=400, detail="클래스명 목록이 비어있습니다")
+
+        deleted = []
+        failed = []
+        total_cleaned = 0
+
+        for class_name in req.names:
+            try:
+                class_name = class_name.strip()
+                if not _CLASS_NAME_RE.match(class_name):
+                    failed.append({"class": class_name, "error": "Invalid class name"})
+                    continue
+
+                class_dir = _classification_dir() / class_name
+                if not class_dir.exists() or not class_dir.is_dir():
+                    failed.append({"class": class_name, "error": "Class not found"})
+                    continue
+
+                shutil.rmtree(class_dir)
+                deleted.append(class_name)
+                logger.info(f"클래스 삭제: {class_name}")
+
+                total_cleaned += _remove_label_from_all_images(class_name)
+
+            except Exception as e:
+                failed.append({"class": class_name, "error": str(e)})
+                logger.exception(f"클래스 {class_name} 삭제 실패: {e}")
+
+        # 배치 삭제 후 강제로 라벨 리로드
+        if total_cleaned > 0:
+            _labels_load()
+            logger.info(f"배치 삭제 후 라벨 리로드: {total_cleaned}개 라벨 정리됨")
+
+        _dircache_invalidate(_classification_dir())
         
-        if not class_name or not image_path:
-            raise HTTPException(status_code=400, detail="Class name and image path are required")
+        # 배치 삭제 후 즉시 Label Explorer 강제 새로고침
+        logger.info(f"배치 클래스 삭제 완료 - Label Explorer 강제 새로고침 필요")
         
-        # 원본 이미지 경로 확인
-        source_image = safe_resolve_path(image_path)
-        if not source_image.exists() or not source_image.is_file():
-            raise HTTPException(status_code=404, detail="Source image not found")
-        
-        # classification 폴더에 이미지 복사
-        class_dir = ROOT_DIR / "classification" / class_name
+        return {
+            "success": True,
+            "deleted": deleted,
+            "failed": failed,
+            "labels_cleaned": total_cleaned,
+            "refresh_required": True,
+            "message": f"{len(deleted)}개 클래스 삭제 완료, {len(failed)}개 실패"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"클래스 일괄 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/classes/{class_name}/images")
+async def class_images(
+    class_name: str = PathParam(..., min_length=1, max_length=128),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0)
+):
+    """해당 클래스 폴더 내 이미지(재귀)"""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        if not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class_name")
+        class_dir = _classification_dir() / class_name
+        if not class_dir.exists() or not class_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Class not found")
+
+        found: List[str] = []
+        goal = offset + limit
+        for p in class_dir.rglob("*"):
+            if p.is_file() and is_supported_image(p):
+                rel = str(p.relative_to(ROOT_DIR)).replace("\\", "/")
+                found.append(rel)
+                if len(found) >= goal:
+                    break
+        results = found[offset: offset + limit]
+        return {"success": True, "class": class_name, "results": results, "offset": offset, "limit": limit}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"클래스 이미지 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========== 엔드포인트: 라벨 ==========
+class LabelAddReq(BaseModel):
+    image_path: str = Field(..., description="ROOT 기준 상대경로 또는 절대경로도 허용")
+    labels: List[str] = Field(..., min_items=1)
+
+class LabelDelReq(BaseModel):
+    image_path: str
+    labels: Optional[List[str]] = None  # None이면 해당 이미지의 모든 라벨 삭제
+
+@app.post("/api/labels")
+async def add_labels(req: LabelAddReq):
+    """이미지에 라벨 추가(중복 무시). 이미지 존재/확장자 검증."""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        rel = relkey_from_any_path(req.image_path)
+        abs_path = ROOT_DIR / rel
+        if not abs_path.exists() or not abs_path.is_file():
+            raise HTTPException(status_code=404, detail="Image not found")
+        if not is_supported_image(abs_path):
+            raise HTTPException(status_code=400, detail="Unsupported image format")
+
+        new_labels = [str(x).strip() for x in req.labels if str(x).strip()]
+        if not new_labels:
+            raise HTTPException(status_code=400, detail="Empty labels")
+
+        with LABELS_LOCK:
+            cur = set(LABELS.get(rel, []))
+            cur.update(new_labels)
+            LABELS[rel] = sorted(cur)
+        _labels_save()
+
+        # 라벨 변경 후에도 classification 목록을 즉시 새로고침시키기 위해 캐시 무효화
+        _dircache_invalidate(_classification_dir())
+        return {"success": True, "image": rel, "labels": LABELS[rel]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"라벨 추가 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/labels")
+async def delete_labels(req: LabelDelReq):
+    """이미지 라벨 제거. labels가 None이면 그 이미지의 모든 라벨 삭제."""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        rel = relkey_from_any_path(req.image_path)
+        with LABELS_LOCK:
+            if rel not in LABELS:
+                raise HTTPException(status_code=404, detail="No labels for this image")
+            if req.labels is None:
+                LABELS.pop(rel, None)
+            else:
+                to_remove = {str(x).strip() for x in req.labels if str(x).strip()}
+                if not to_remove:
+                    raise HTTPException(status_code=400, detail="Empty labels to remove")
+                remain = [x for x in LABELS[rel] if x not in to_remove]
+                if remain:
+                    LABELS[rel] = remain
+                else:
+                    LABELS.pop(rel, None)
+        _labels_save()
+
+        _dircache_invalidate(_classification_dir())
+        return {"success": True, "image": rel, "labels": LABELS.get(rel, [])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"라벨 제거 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# DELETE 바디 이슈 회피용 POST 버전
+@app.post("/api/labels/delete")
+async def delete_labels_post(req: LabelDelReq):
+    return await delete_labels(req)
+
+@app.get("/api/labels/{image_path:path}")
+async def get_labels(image_path: str):
+    """이미지 라벨 조회(없으면 빈 배열)"""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        rel = relkey_from_any_path(image_path)
+        with LABELS_LOCK:
+            labels = list(LABELS.get(rel, []))
+        return {"success": True, "image": rel, "labels": labels}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"라벨 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ClassifyRequest(BaseModel):
+    image_path: str = Field(..., description="이미지 경로")
+    class_name: str = Field(..., description="분류할 클래스명")
+
+@app.post("/api/classify")
+async def classify_image(req: ClassifyRequest):
+    """이미지를 특정 클래스로 분류 (라벨 추가 + 파일 복사)"""
+    try:
+        set_user_activity()
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        logger.info(f"분류 요청 받음: image_path='{req.image_path}', class_name='{req.class_name}'")
+        if not req.image_path or not req.class_name:
+            raise HTTPException(status_code=400, detail="이미지 경로와 클래스명이 필요합니다")
+
+        image_path = req.image_path.strip()
+        class_name = req.class_name.strip()
+
+        full_image_path = safe_resolve_path(image_path)
+        if not full_image_path.exists() or not full_image_path.is_file():
+            raise HTTPException(status_code=404, detail="이미지 파일을 찾을 수 없습니다")
+
+        classification_dir = _classification_dir()
+        class_dir = classification_dir / class_name
         class_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 이미지 파일명 추출 및 복사
-        import shutil
-        target_image = class_dir / source_image.name
-        
-        # 이미 존재하는 경우 덮어쓰기
-        shutil.copy2(source_image, target_image)
-        
+
+        target_path = class_dir / full_image_path.name
+        shutil.copy2(full_image_path, target_path)
+
+        rel = relkey_from_any_path(image_path)
+        with LABELS_LOCK:
+            if rel not in LABELS:
+                LABELS[rel] = []
+            if class_name not in LABELS[rel]:
+                LABELS[rel].append(class_name)
+        _labels_save()
+
+        _dircache_invalidate(_classification_dir())
+        _dircache_invalidate(class_dir)
+
         logger.info(f"이미지 분류: {image_path} -> {class_name}")
-        return {"success": True, "message": f"Image classified to class '{class_name}'"}
-        
+        return {
+            "success": True,
+            "message": f"이미지 '{image_path}'이 클래스 '{class_name}'으로 분류되었습니다",
+            "image": rel,
+            "class": class_name
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"이미지 분류 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/thumbnail/preload")
-async def preload_thumbnails(request: Request):
-    """썸네일 프리로드 (배치 처리)"""
+class ClassifyDeleteRequest(BaseModel):
+    image_path: Optional[str] = Field(None, description="분류를 제거할 이미지 경로")
+    image_name: Optional[str] = Field(None, description="분류를 제거할 이미지 파일명")
+    class_name: str = Field(..., description="제거할 클래스명")
+
+@app.post("/api/classify/delete")
+async def delete_classification(req: ClassifyDeleteRequest):
+    """이미지에서 특정 클래스 분류 제거 (클래스 폴더 파일 삭제 + 라벨 동기화)"""
     try:
         set_user_activity()
-        body = await request.json()
-        image_paths = body.get("paths", [])
-        size = body.get("size", 512)
-        
-        if not image_paths:
-            return {"success": True, "message": "No images to preload"}
-        
-        # 썸네일 생성 작업을 백그라운드에서 실행
-        async def _preload_batch():
-            for path in image_paths:
-                try:
-                    image_path = safe_resolve_path(path)
-                    if image_path.exists() and is_supported_image(image_path):
-                        await generate_thumbnail(image_path, (size, size))
-                except Exception as e:
-                    logger.warning(f"썸네일 프리로드 실패 {path}: {e}")
-                await asyncio.sleep(0.01)  # 가벼운 양보
-        
-        asyncio.create_task(_preload_batch())
-        
-        return {"success": True, "message": f"Preloading {len(image_paths)} thumbnails"}
-        
+        _labels_reload_if_stale()
+        _sync_labels_if_classes_changed()
+
+        logger.info(
+            f"분류 제거 요청 받음: image_path='{req.image_path}', image_name='{req.image_name}', class_name='{req.class_name}'"
+        )
+
+        if not req.class_name:
+            raise HTTPException(status_code=400, detail="클래스명이 필요합니다")
+        class_name = req.class_name.strip()
+
+        if not req.image_path and not req.image_name:
+            raise HTTPException(status_code=400, detail="이미지 경로 또는 이미지 파일명이 필요합니다")
+
+        classification_dir = _classification_dir()
+        class_dir = classification_dir / class_name
+        if not class_dir.exists():
+            raise HTTPException(status_code=404, detail="클래스를 찾을 수 없습니다")
+
+        if req.image_name:
+            image_file = class_dir / req.image_name.strip()
+        else:
+            image_file = class_dir / Path(req.image_path.strip()).name
+
+        if not image_file.exists():
+            raise HTTPException(status_code=404, detail="해당 클래스에 이미지가 없습니다")
+
+        # 1) 클래스 폴더에서 파일 삭제
+        image_file.unlink()
+        logger.info(f"분류 제거(파일): {image_file.name} from class '{class_name}'")
+
+        # 2) 라벨 동기화
+        removed_from: List[str] = []
+        with LABELS_LOCK:
+            if req.image_path:
+                rel = relkey_from_any_path(req.image_path)
+                labs = LABELS.get(rel, [])
+                if class_name in labs:
+                    LABELS[rel] = [x for x in labs if x != class_name]
+                    if not LABELS[rel]:
+                        LABELS.pop(rel, None)
+                    removed_from.append(rel)
+            else:
+                fname = image_file.name
+                for rel, labs in list(LABELS.items()):
+                    if Path(rel).name == fname and class_name in labs:
+                        LABELS[rel] = [x for x in labs if x != class_name]
+                        if not LABELS[rel]:
+                            LABELS.pop(rel, None)
+                        removed_from.append(rel)
+
+        if removed_from:
+            _labels_save()
+
+        _dircache_invalidate(_classification_dir())
+        _dircache_invalidate(class_dir)
+
+        return {
+            "success": True,
+            "message": f"이미지 '{image_file.name}'의 클래스 '{class_name}' 분류를 제거했습니다",
+            "removed_from": removed_from
+        }
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"썸네일 프리로드 실패: {e}")
+        logger.exception(f"분류 제거 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 정적 파일
+# ========== 기타 ==========
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 @app.get("/")
@@ -630,9 +1095,13 @@ async def get_main_js():
 # ========== 라이프사이클 ==========
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 L3Tracker 서버 시작 (Config-driven Max-Throughput)")
+    logger.info("🚀 L3Tracker 서버 시작 (Class/Label 즉시반영)")
     logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
     logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
+    _classification_dir().mkdir(parents=True, exist_ok=True)
+    LABELS_DIR.mkdir(parents=True, exist_ok=True)
+    _labels_load()
+    global CLASSES_MTIME; CLASSES_MTIME = _classes_stat_mtime()
     asyncio.create_task(build_file_index_background())
 
 @app.on_event("shutdown")
