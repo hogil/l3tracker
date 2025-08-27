@@ -2236,7 +2236,12 @@ class WaferMapViewer {
                 viewControls.style.display = 'flex';
             }
             
+            // 레이아웃 안정화 후 한 번 더 맞춤 (컨테이너 크기 반영)
             this.scheduleDraw();
+            setTimeout(() => {
+                // 이미지가 표시된 후 컨테이너 rect가 변하는 경우 재계산
+                this.resetView(true);
+            }, 0);
         } catch (err) {
             console.error(`Failed to load image: ${path}`, err);
             this.dom.minimapContainer.style.display = 'none';
@@ -2294,7 +2299,8 @@ class WaferMapViewer {
         const fitScale = (imgRatio > containerRatio)
             ? container.width / this.currentImage.width
             : container.height / this.currentImage.height;
-        this.transform.scale = fitScale * 0.99;
+        // 여유 비율 2% 적용
+        this.transform.scale = fitScale * 0.98;
         this.transform.dx = (container.width - this.currentImage.width * this.transform.scale) / 2;
         this.transform.dy = (container.height - this.currentImage.height * this.transform.scale) / 2; // 가운데 정렬
         this.updateZoomDisplay();
