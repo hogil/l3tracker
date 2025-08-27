@@ -380,6 +380,8 @@ class WaferMapViewer {
         if (this.dom.fileExplorer) {
             this.dom.fileExplorer.addEventListener('click', e => this.handleFileClick(e));
             this.dom.fileExplorer.addEventListener('contextmenu', e => this.handleFileRightClick(e));
+            // 드래그 멀티 선택 초기화
+            this.setupFileExplorerDragSelect();
         }
     }
 
@@ -1985,62 +1987,53 @@ class WaferMapViewer {
         const target = e.target;
         // Handle folder expansion
         if (target.tagName === 'SUMMARY' && target.classList.contains('folder')) {
+            // Ctrl/Shift 수정키 클릭 시 폴더가 펼쳐지지 않도록 기본 동작을 먼저 차단
+            if (e.ctrlKey || (e.shiftKey && this.lastSelectedFolder)) {
+                e.preventDefault();
+                e.stopPropagation();
+                // ctrl+클릭으로 폴더 선택/해제 (폴더 열리지 않음)
+                if (e.ctrlKey) {
+                    const path = target.dataset.path;
+                    if (!this.selectedFolders) this.selectedFolders = new Set();
+                    // 다른 Explorer 선택 해제
+                    this.clearLabelExplorerSelection();
+                    // 첫 번째 선택된 폴더 기록 (Shift 선택용)
+                    if (!this.lastSelectedFolder && !target.classList.contains('selected')) {
+                        this.lastSelectedFolder = target;
+                    }
+                    if (target.classList.contains('selected')) {
+                        // 선택 해제
+                        target.classList.remove('selected');
+                        this.selectedFolders.delete(path);
+                        await this.deselectFolderFiles(path);
+                    } else {
+                        // 선택 - 폴더는 열지 않고 선택만
+                        target.classList.add('selected');
+                        this.selectedFolders.add(path);
+                        await this.selectAllFolderFiles(path);
+                    }
+                    // UI 업데이트
+                    this.updateFileExplorerSelection();
+                    return; // 추가 처리 방지
+                }
+                // shift+클릭으로 범위 선택 (폴더 열리지 않음)
+                if (e.shiftKey && this.lastSelectedFolder) {
+                    if (!this.selectedFolders) this.selectedFolders = new Set();
+                    // 다른 Explorer 선택 해제
+                    this.clearLabelExplorerSelection();
+                    await this.selectFolderRange(this.lastSelectedFolder, target);
+                    // UI 업데이트
+                    this.updateFileExplorerSelection();
+                    return;
+                }
+            }
+            // 수정키가 아닐 때만 폴더 로드/펼침 처리
             const detailsElement = target.parentElement;
             if (!detailsElement.open && !detailsElement.dataset.loaded) {
                 const path = target.dataset.path;
                 const contentDiv = target.nextElementSibling;
                 await this.loadDirectoryContents(path, contentDiv);
                 detailsElement.dataset.loaded = 'true';
-            }
-            // ctrl+클릭으로 폴더 선택/해제 (폴더 열리지 않음)
-            if (e.ctrlKey) {
-                e.preventDefault(); // 기본 폴더 열기/닫기 동작 방지
-                e.stopPropagation(); // 이벤트 버블링 방지
-                
-                const path = target.dataset.path;
-                if (!this.selectedFolders) this.selectedFolders = new Set();
-                
-                // 다른 Explorer 선택 해제
-                this.clearLabelExplorerSelection();
-                
-                // 첫 번째 선택된 폴더 기록 (Shift 선택용)
-                if (!this.lastSelectedFolder && !target.classList.contains('selected')) {
-                    this.lastSelectedFolder = target;
-                }
-                
-                if (target.classList.contains('selected')) {
-                    // 선택 해제
-                    target.classList.remove('selected');
-                    this.selectedFolders.delete(path);
-                    await this.deselectFolderFiles(path);
-                } else {
-                    // 선택 - 폴더는 열지 않고 선택만
-                    target.classList.add('selected');
-                    this.selectedFolders.add(path);
-                    await this.selectAllFolderFiles(path);
-                }
-                
-                // UI 업데이트
-                this.updateFileExplorerSelection();
-                return; // 추가 처리 방지
-            }
-            
-            // shift+클릭으로 범위 선택 (폴더 열리지 않음)
-            if (e.shiftKey && this.lastSelectedFolder) {
-                e.preventDefault();
-                e.stopPropagation(); // 이벤트 버블링 방지
-                
-                const path = target.dataset.path;
-                if (!this.selectedFolders) this.selectedFolders = new Set();
-                
-                // 다른 Explorer 선택 해제
-                this.clearLabelExplorerSelection();
-                
-                await this.selectFolderRange(this.lastSelectedFolder, target);
-                
-                // UI 업데이트
-                this.updateFileExplorerSelection();
-                return;
             }
         } 
         // Handle file selection (multi-select)
@@ -2095,6 +2088,135 @@ class WaferMapViewer {
                 if (a) a.classList.add('selected');
             });
         }
+    }
+
+    // 파일 탐색기 드래그 멀티 선택
+    setupFileExplorerDragSelect() {
+        const container = this.dom.fileExplorer;
+        if (!container) return;
+        // 오버레이 준비
+        container.style.position = container.style.position || 'relative';
+        let overlay = document.getElementById('explorer-drag-select');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'explorer-drag-select';
+            overlay.style.cssText = `
+                position:absolute; left:0; top:0; width:0; height:0;
+                border:2px solid #09f; background:rgba(0,153,255,0.15);
+                border-radius:2px; pointer-events:none; display:none; z-index:1000;`;
+            container.appendChild(overlay);
+        }
+        const getScrollAdjusted = (clientX, clientY) => {
+            const rect = container.getBoundingClientRect();
+            return {
+                x: clientX - rect.left + container.scrollLeft,
+                y: clientY - rect.top + container.scrollTop
+            };
+        };
+        let dragging = false;
+        let start = null;
+        const onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            // 파일/폴더 링크 위에서도 드래그 시작 허용
+            dragging = true;
+            start = getScrollAdjusted(e.clientX, e.clientY);
+            overlay.style.left = start.x + 'px';
+            overlay.style.top = start.y + 'px';
+            overlay.style.width = '0px';
+            overlay.style.height = '0px';
+            overlay.style.display = 'block';
+            e.preventDefault();
+        };
+        const onMouseMove = (e) => {
+            if (!dragging || !start) return;
+            const curr = getScrollAdjusted(e.clientX, e.clientY);
+            const left = Math.min(start.x, curr.x);
+            const top = Math.min(start.y, curr.y);
+            const width = Math.abs(curr.x - start.x);
+            const height = Math.abs(curr.y - start.y);
+            overlay.style.left = left + 'px';
+            overlay.style.top = top + 'px';
+            overlay.style.width = width + 'px';
+            overlay.style.height = height + 'px';
+        };
+        const intersects = (el, dragLeft, dragTop, dragRight, dragBottom) => {
+            const elRect = el.getBoundingClientRect();
+            const contRect = container.getBoundingClientRect();
+            const left = elRect.left - contRect.left + container.scrollLeft;
+            const top = elRect.top - contRect.top + container.scrollTop;
+            const right = left + elRect.width;
+            const bottom = top + elRect.height;
+            return (
+                dragRight >= left && dragLeft <= right && dragBottom >= top && dragTop <= bottom
+            );
+        };
+        const onMouseUp = async (e) => {
+            if (!dragging) return;
+            dragging = false;
+            overlay.style.display = 'none';
+            const end = getScrollAdjusted(e.clientX, e.clientY);
+            if (!start) return;
+            const dragLeft = Math.min(start.x, end.x);
+            const dragTop = Math.min(start.y, end.y);
+            const dragRight = Math.max(start.x, end.x);
+            const dragBottom = Math.max(start.y, end.y);
+            // 최소 이동은 클릭으로 간주 → 기본 동작 유지
+            if (Math.abs(end.x - start.x) + Math.abs(end.y - start.y) < 6) {
+                start = null;
+                return;
+            }
+            // 교차 요소 수집
+            const fileLinks = Array.from(container.querySelectorAll('a[data-path]'));
+            const folderSummaries = Array.from(container.querySelectorAll('summary.folder'));
+            const hitFiles = fileLinks.filter(a => intersects(a, dragLeft, dragTop, dragRight, dragBottom)).map(a => a.dataset.path);
+            const hitFolders = folderSummaries.filter(s => intersects(s, dragLeft, dragTop, dragRight, dragBottom));
+            // 다른 Explorer 선택 해제
+            this.clearLabelExplorerSelection();
+            // Ctrl이면 토글, 아니면 교체
+            if (e.ctrlKey) {
+                // 파일 토글
+                const current = new Set(this.selectedImages || []);
+                for (const p of hitFiles) {
+                    if (current.has(p)) current.delete(p); else current.add(p);
+                }
+                this.selectedImages = Array.from(current);
+                // 폴더 토글 (파일 선택 반영 포함)
+                if (!this.selectedFolders) this.selectedFolders = new Set();
+                for (const s of hitFolders) {
+                    const path = s.dataset.path;
+                    if (s.classList.contains('selected')) {
+                        s.classList.remove('selected');
+                        this.selectedFolders.delete(path);
+                        await this.deselectFolderFiles(path);
+                    } else {
+                        s.classList.add('selected');
+                        this.selectedFolders.add(path);
+                        await this.selectAllFolderFiles(path);
+                    }
+                }
+            } else {
+                // 교체 선택
+                this.selectedImages = hitFiles;
+                // 폴더 선택 교체
+                this.selectedFolders = new Set();
+                // 요약 선택 클래스 초기화
+                container.querySelectorAll('summary.folder.selected').forEach(s => s.classList.remove('selected'));
+                // 폴더 파일 추가 선택
+                for (const s of hitFolders) {
+                    const path = s.dataset.path;
+                    s.classList.add('selected');
+                    this.selectedFolders.add(path);
+                    await this.selectAllFolderFiles(path);
+                }
+            }
+            // UI 업데이트 및 그리드/이미지 표시 갱신
+            this.updateFileExplorerSelection();
+            start = null;
+        };
+        // 이벤트 등록
+        container.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove, { passive: true });
+        document.addEventListener('mouseup', onMouseUp);
     }
 
     // --- IMAGE LOADING ---
@@ -2168,9 +2290,11 @@ class WaferMapViewer {
         const container = this.dom.viewerContainer.getBoundingClientRect();
         const imgRatio = this.currentImage.width / this.currentImage.height;
         const containerRatio = container.width / container.height;
-        this.transform.scale = (imgRatio > containerRatio)
+        // 창 크기에 딱 맞추는 대신 1% 여유를 두어 가장자리 클리핑을 방지
+        const fitScale = (imgRatio > containerRatio)
             ? container.width / this.currentImage.width
             : container.height / this.currentImage.height;
+        this.transform.scale = fitScale * 0.99;
         this.transform.dx = (container.width - this.currentImage.width * this.transform.scale) / 2;
         this.transform.dy = (container.height - this.currentImage.height * this.transform.scale) / 2; // 가운데 정렬
         this.updateZoomDisplay();
