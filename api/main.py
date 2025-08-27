@@ -35,16 +35,45 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
-# uvicorn 로깅 설정 (옵션 없이도 시간 표시)
+# 색상 포맷터 클래스
+class ColoredFormatter(logging.Formatter):
+    """컬러 로그 포맷터"""
+    
+    COLORS = {
+        'DEBUG': '\033[36m',    # 청록색
+        'INFO': '\033[32m',     # 초록색
+        'WARNING': '\033[33m',  # 노란색
+        'ERROR': '\033[31m',    # 빨간색
+        'CRITICAL': '\033[35m', # 자주색
+        'RESET': '\033[0m'      # 리셋
+    }
+    
+    def format(self, record):
+        # 레벨에 따른 색상 적용
+        level_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+        reset_color = self.COLORS['RESET']
+        
+        # 원래 포맷 적용
+        formatted = super().format(record)
+        
+        # 색상 적용: 레벨명만 색상 적용
+        colored_level = f"{level_color}{record.levelname}{reset_color}"
+        formatted = formatted.replace(record.levelname, colored_level, 1)
+        
+        return formatted
+
+# uvicorn 로깅 설정 (옵션 없이도 시간 표시 + 색상)
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "default": {
+            "()": ColoredFormatter,
             "format": "%(levelname)s: %(asctime)s     %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "access": {
+            "()": ColoredFormatter,
             "format": "%(levelname)s: %(asctime)s     %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         }
