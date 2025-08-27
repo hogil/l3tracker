@@ -1,99 +1,124 @@
-# L3Tracker - 변경사항 및 개선 기록
+# Changelog
 
-## 📋 프로젝트 개요
+All notable changes to L3Tracker will be documented in this file.
 
-L3Tracker는 웨이퍼 맵 이미지를 탐색하고 라벨링할 수 있는 웹 기반 도구입니다. 기존 웨이퍼 맵 뷰어의 사용성을 대폭 개선하여 다양한 기능을 제공합니다.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.4.0] - 2024-12-27
+
+### ✨ Added
+- Real-time file system monitoring without server restart
+- Intelligent directory caching with automatic invalidation
+- Advanced search with OR/AND/NOT operators and parentheses support
+- Drag selection in grid mode for multiple thumbnails
+- Batch operations context menu (download, merge, copy)
+- Clipboard operations for image and file lists
+- Label Explorer with visual classification organization
+- Keyboard shortcuts (Escape, Ctrl+A) in grid mode
+- Memory optimization with automatic cleanup
+- Toast notifications for user feedback
+
+### 🐛 Fixed
+- Class deletion now immediately reflects in file system
+- Label files properly sync after class removal
+- New folders in images directory appear without restart
+- Grid mode thumbnail loading performance improved
+- Memory leaks from blob URLs properly cleaned
+- File system cache invalidation for dynamic paths
+
+### 🔄 Changed
+- Caching strategy: classification/images/labels paths no longer cached
+- Improved thumbnail manager with concurrent loading limits
+- Better error handling for file operations
+- Enhanced UI responsiveness during heavy operations
+- Optimized grid rendering for large image sets
+
+### 🔧 Technical
+- Migrated from single file to modular architecture
+- Implemented LRU cache with TTL for thumbnails
+- Added thread pool executor for I/O operations
+- Introduced semaphore for thumbnail generation control
+- Cache invalidation cascade for related paths
+
+## [2.3.0] - 2024-12-20
+
+### Added
+- Multi-threaded thumbnail generation
+- Worker process configuration
+- Batch classification support
+- File system event handlers
+
+### Fixed
+- Memory management issues
+- Thumbnail generation bottlenecks
+
+## [2.2.0] - 2024-12-15
+
+### Added
+- Grid view with adjustable columns
+- Minimap navigation
+- Pan and zoom controls
+- Search functionality
+
+### Changed
+- Improved UI responsiveness
+- Better error handling
+
+## [2.1.0] - 2024-12-10
+
+### Added
+- Label Explorer interface
+- Class management system
+- JSON export for labels
+
+### Fixed
+- File selection bugs
+- UI scaling issues
+
+## [2.0.0] - 2024-12-05
+
+### Added
+- Complete FastAPI backend rewrite
+- Real-time updates
+- Concurrent processing
+
+### Changed
+- Migrated from Flask to FastAPI
+- New modular architecture
+
+### Removed
+- Legacy synchronous endpoints
+
+## [1.5.0] - 2024-11-30
+
+### Added
+- Basic classification features
+- Image thumbnails
+- Folder navigation
+
+## [1.0.0] - 2024-11-20
+
+### Added
+- Initial release
+- Basic image viewer
+- File explorer
+- Simple labeling
 
 ---
 
-## 🚀 주요 기능 및 개선사항
+## Upgrade Notes
 
-### **1. 폴더 선택 로직 개선**
-- Ctrl+클릭 시 폴더가 자동으로 열리지 않도록 수정
-- 폴더 선택 상태만 관리하여 사용자 경험 향상
+### From 2.3.x to 2.4.0
+- No breaking changes
+- Clear browser cache for best performance
+- Optional: Delete old thumbnail cache
 
-### **2. Shift 범위 선택 기능**
-- Ctrl로 첫 번째 폴더 선택 후 Shift로 두 번째 폴더 선택 시
-- 두 폴더 사이의 모든 폴더와 내부 파일들을 자동 선택
+### From 2.2.x to 2.3.0
+- Update config.py with new worker settings
+- Restart server after update
 
-### **3. 클래스 관리 시스템**
-- 우측 클래스 추가 버튼 안정화
-- classification 폴더에 클래스 정상 생성
-- 에러 처리 및 사용자 피드백 개선
-
-### **4. 통합 검색 시스템**
-- 상단에 폴더명/파일명 검색 입력창 추가
-- 매칭되는 모든 파일을 그리드 모드로 표시
-- 재귀적 디렉터리 탐색으로 전체 파일 시스템 검색
-
-### **5. 기본 그리드 모드 + 컨텍스트 메뉴**
-- 단일 파일 선택 시에도 그리드 모드로 표시
-- 우클릭 시 다양한 옵션 제공:
-  - 파일 다운로드
-  - 이미지 합치기 (N개 → √N×√N 그리드)
-  - 파일 리스트 복사
-
-### **6. 썸네일 품질 개선**
-- 썸네일 이미지 잘림 현상 수정
-- 크기를 512px로 확대, 품질 최대 설정
-
-### **7. 반응형 UI 개선**
-- 모바일과 데스크톱 모두 지원
-- 터치 제스처 지원
-- 반응형 레이아웃 최적화
-
-### **8. 성능 최적화**
-- 이미지 로딩 최적화
-- 메모리 사용량 개선
-- 대용량 데이터셋 처리 능력 향상
-
----
-
-## 📁 주요 수정 파일
-
-- `main.js` - 핵심 애플리케이션 로직
-- `index.html` - UI 구조 및 스타일
-- `js/` - 모듈화된 JavaScript 기능들
-- `api/` - FastAPI 백엔드
-
----
-
-## 🔄 최근 업데이트
-
-### v1.2.0 (2024-12-19)
-- 테스트 파일 정리 및 제거
-- README.md 업데이트
-- 프로젝트 구조 정리
-- GitHub 배포 준비
-
-### v1.1.0 (2024-12-18)
-- 검색 기능 개선
-- 그리드 모드 안정화
-- UI/UX 개선
-
-### v1.0.0 (2024-12-17)
-- 초기 릴리즈
-- 기본 이미지 뷰어 기능
-- 라벨링 시스템 구현
-
----
-
-## 🛠️ 기술 스택
-
-- **프론트엔드**: HTML5, CSS3, JavaScript (ES6+)
-- **백엔드**: Python, FastAPI
-- **이미지 처리**: Canvas API, File API
-- **데이터 저장**: JSON, 파일 시스템
-
----
-
-## 📞 지원 및 기여
-
-문제가 발생하거나 개선 제안이 있으시면:
-- GitHub Issues 페이지에 등록
-- Pull Request 제출
-- 프로젝트 문서 참조
-
----
-
-⭐ 이 프로젝트가 도움이 되었다면 스타를 눌러주세요!
+### From 1.x to 2.x
+- Complete reinstall recommended
+- Backup labels.json before upgrade
+- New config format required

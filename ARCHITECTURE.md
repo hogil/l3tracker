@@ -1,186 +1,307 @@
-# L3Tracker - 프로젝트 구조 및 아키텍처
+# L3Tracker Architecture
 
-## 📁 프로젝트 구조
+## System Overview
+
+L3Tracker is a high-performance web application built with a modern, scalable architecture designed for real-time image management and classification.
 
 ```
-l3tracker/
-├── 🖥️ 프론트엔드
-│   ├── index.html          # 메인 HTML 페이지
-│   ├── main.js             # 핵심 JavaScript 로직
-│   └── js/                 # 모듈화된 JavaScript
-│       ├── grid.js         # 그리드 뷰 기능
-│       ├── labels.js       # 라벨링 시스템
-│       ├── search.js       # 검색 기능
-│       ├── context-menu.js # 컨텍스트 메뉴
-│       └── utils.js        # 유틸리티 함수
-│
-├── 🚀 백엔드 API
-│   └── api/
-│       ├── main.py         # FastAPI 서버
-│       ├── config.py       # 설정 파일
-│       └── __init__.py
-│
-├── 📱 Streamlit 앱
-│   └── frontend/
-│       └── app.py          # 대시보드 (선택사항)
-│
-├── 📋 문서
-│   ├── README.md           # 프로젝트 설명
-│   ├── ARCHITECTURE.md     # 이 파일
-│   └── CHANGELOG.md        # 변경사항 기록
-│
-└── 📊 데이터
-    └── data/wm-811k/       # 웨이퍼 맵 이미지
+┌──────────────────────────────────────────────────────┐
+│                   Web Browser                        │
+│  ┌──────────────────────────────────────────────┐  │
+│  │            HTML/CSS/JavaScript               │  │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────────┐   │  │
+│  │  │ main.js │ │ grid.js │ │ labels.js   │   │  │
+│  │  └─────────┘ └─────────┘ └─────────────┘   │  │
+│  └──────────────────────────────────────────────┘  │
+└────────────────────┬────────────────────────────────┘
+                     │ HTTP/WebSocket
+┌────────────────────┴────────────────────────────────┐
+│                 FastAPI Backend                      │
+│  ┌──────────────────────────────────────────────┐  │
+│  │              API Endpoints                    │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐  │  │
+│  │  │  Files   │ │  Images  │ │   Labels   │  │  │
+│  │  └──────────┘ └──────────┘ └────────────┘  │  │
+│  ├──────────────────────────────────────────────┤  │
+│  │            Caching Layer                      │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐  │  │
+│  │  │   LRU    │ │   TTL    │ │  DirList   │  │  │
+│  │  └──────────┘ └──────────┘ └────────────┘  │  │
+│  ├──────────────────────────────────────────────┤  │
+│  │         Concurrent Processing                 │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐  │  │
+│  │  │ThreadPool│ │Semaphore │ │  Workers   │  │  │
+│  │  └──────────┘ └──────────┘ └────────────┘  │  │
+│  └──────────────────────────────────────────────┘  │
+└────────────────────┬────────────────────────────────┘
+                     │ File System
+┌────────────────────┴────────────────────────────────┐
+│                  Data Storage                        │
+│  ┌──────────────────────────────────────────────┐  │
+│  │  Images  │  Thumbnails  │  Labels  │ Classes │  │
+│  └──────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────┘
 ```
 
-## 🏗️ 시스템 아키텍처
+## Core Components
 
-### **웹 기반 3계층 구조**
-```
-┌─────────────────┐    HTTP/WebSocket    ┌──────────────────┐    File I/O    ┌─────────────────┐
-│   프론트엔드     │ ◄──────────────────► │    백엔드 API     │ ◄─────────────► │   파일 시스템    │
-│   (브라우저)     │                      │   (FastAPI)      │                │ (이미지/썸네일)  │
-└─────────────────┘                      └──────────────────┘                └─────────────────┘
-```
+### 1. Frontend Layer
 
-### **주요 컴포넌트**
+#### main.js - Core Application
+- **WaferMapViewer Class**: Central controller managing all UI interactions
+- **State Management**: Maintains application state for selections, modes, and transforms
+- **Event Handling**: Coordinates mouse, keyboard, and touch events
+- **DOM Caching**: Optimizes performance by caching DOM element references
 
-#### 🎨 **프론트엔드**
-- **단일 페이지 애플리케이션 (SPA)**
-- **3패널 레이아웃**: 파일탐색기 | 이미지뷰어 | 클래스관리
-- **모드 전환**: 단일 이미지 ↔ 그리드 모드
-- **실시간 썸네일 로딩**
+#### grid.js - Grid View System
+- **Dynamic Grid Layout**: Adjustable columns (1-10) with real-time updates
+- **Thumbnail Manager**: Intelligent caching and lazy loading
+- **Drag Selection**: Box selection with scroll-aware coordinates
+- **Batch Operations**: Context menu for multiple image operations
 
-#### ⚡ **백엔드**
-- **RESTful API** 설계
-- **비동기 처리** (async/await)
-- **백그라운드 썸네일 생성**
-- **파일 시스템 추상화**
+#### labels.js - Classification Interface
+- **Label Explorer**: Hierarchical view of classified images
+- **Class Manager**: CRUD operations for classification categories
+- **Real-time Sync**: Automatic updates when file system changes
 
-## 🔄 주요 동작 흐름
+### 2. Backend Layer
 
-### **1. 애플리케이션 시작**
-```
-브라우저 접속 → HTML/JS 로드 → WaferMapViewer 초기화 → 이벤트 바인딩 → 파일 탐색기 로드
-```
-
-### **2. 파일 선택 및 표시**
-```
-파일 클릭 → 선택된 파일 수 확인 → 그리드 모드 전환 → 썸네일 로드 → 이미지 표시
+#### FastAPI Application (main.py)
+```python
+# Core Features
+- Async request handling with uvicorn
+- Middleware for CORS and compression
+- User activity prioritization
+- Background task management
 ```
 
-### **3. 썸네일 생성**
+#### Caching System
+```python
+# Three-tier caching
+1. LRU Cache: Directory listings (1024 entries)
+2. TTL Cache: Thumbnail stats (8192 entries, 5s TTL)
+3. Memory Cache: File index for search
 ```
-이미지 요청 → 썸네일 존재 확인 → 없으면 생성 → 512x512 리사이즈 → WebP 저장 → 반환
+
+#### Concurrent Processing
+```python
+# Resource Management
+- ThreadPoolExecutor: IO_THREADS (8-32)
+- Semaphore: THUMBNAIL_SEM (32 concurrent)
+- Workers: Multi-process (75% CPU cores)
 ```
 
-## 🧩 핵심 클래스 및 함수
+### 3. Data Layer
 
-### **JavaScript (main.js)**
+#### File System Structure
+```
+ROOT_DIR/
+├── images/           # Original images
+├── thumbnails/       # Generated thumbnails
+├── labels/          
+│   └── labels.json  # Label database
+└── classification/   # Organized by classes
+    ├── class1/
+    ├── class2/
+    └── ...
+```
 
-#### **WaferMapViewer 클래스** (메인 컨트롤러)
-```javascript
-class WaferMapViewer {
-    constructor()               // 초기화
-    initializeEventListeners() // 이벤트 바인딩
-    loadFileExplorer()         // 파일 탐색기 로드
-    handleFileClick()          // 파일 클릭 처리
-    switchToGridMode()         // 그리드 모드 전환
-    performSearch()            // 검색 실행
-    addClass()                 // 클래스 추가
-    addLabel()                 // 라벨 추가
+#### Label Database Schema
+```json
+{
+  "path/to/image.jpg": ["class1", "class2"],
+  "path/to/another.png": ["class3"]
 }
 ```
 
-#### **주요 메서드**
-- `loadFileExplorer()`: 폴더 구조 로드 및 표시
-- `handleFileClick()`: 파일/폴더 선택 처리
-- `switchToGridMode()`: 그리드 모드로 전환
-- `performSearch()`: 파일명 기반 검색
-- `addClass()`: 새로운 클래스 생성
-- `addLabel()`: 이미지에 라벨 적용
+## Key Design Patterns
 
-### **Python (api/main.py)**
+### 1. Observer Pattern
+- File system monitoring with instant UI updates
+- Event-driven architecture for user interactions
 
-#### **FastAPI 애플리케이션**
+### 2. Strategy Pattern
+- Different caching strategies for different path types
+- Pluggable thumbnail generation backends
+
+### 3. Factory Pattern
+- Dynamic creation of UI components
+- Thumbnail generation with format selection
+
+### 4. Singleton Pattern
+- Single instance of WaferMapViewer
+- Global thumbnail manager
+
+## Performance Optimizations
+
+### 1. Intelligent Caching
 ```python
-app = FastAPI()
-
-@app.get("/api/files")
-async def get_files(path: str = "")
-
-@app.get("/api/thumbnail/{file_path:path}")
-async def get_thumbnail(file_path: str)
-
-@app.post("/api/classes")
-async def create_class(class_data: ClassCreate)
-
-@app.post("/api/labels")
-async def create_label(label_data: LabelCreate)
+# Path-specific caching
+if 'classification' in path or 'images' in path:
+    skip_cache = True  # Real-time updates
+else:
+    use_lru_cache = True  # Performance
 ```
 
-## 🔧 기술적 특징
+### 2. Progressive Loading
+- Lazy directory expansion
+- Viewport-based thumbnail loading
+- Chunked search results
 
-### **프론트엔드**
-- **모듈화**: 기능별 JavaScript 파일 분리
-- **이벤트 기반**: 사용자 상호작용 중심 설계
-- **반응형**: 다양한 화면 크기 지원
-- **성능**: 지연 로딩 및 캐싱
+### 3. Memory Management
+- Automatic blob URL cleanup
+- Periodic cache trimming
+- Request cancellation on navigation
 
-### **백엔드**
-- **비동기**: FastAPI async/await 활용
-- **백그라운드**: 썸네일 생성 작업 분리
-- **캐싱**: 생성된 썸네일 재사용
-- **에러 처리**: 견고한 예외 처리
+### 4. Network Optimization
+- HTTP caching headers (ETag, Cache-Control)
+- Gzip compression
+- Concurrent request limits
 
-### **데이터 처리**
-- **이미지**: PIL/Pillow로 썸네일 생성
-- **파일 시스템**: 경로 기반 파일 탐색
-- **메타데이터**: JSON 형식으로 저장
-- **확장성**: 새로운 이미지 형식 추가 용이
+## Security Considerations
 
-## 📊 성능 최적화
+### 1. Path Traversal Prevention
+```python
+def safe_resolve_path(path):
+    target = (ROOT_DIR / path).resolve()
+    if not str(target).startswith(str(ROOT_DIR)):
+        raise HTTPException(400, "Invalid path")
+```
 
-### **썸네일 시스템**
-- **크기**: 512x512px (고품질)
-- **형식**: WebP (압축률 우수)
-- **백그라운드**: 사용자 작업 방해 없음
-- **캐싱**: 생성된 썸네일 재사용
+### 2. Input Validation
+- Regex validation for class names
+- File extension whitelisting
+- Size limits for uploads
 
-### **검색 시스템**
-- **클라이언트 사이드**: API 호출 최소화
-- **정규식**: 고급 검색 패턴 지원
-- **실시간**: 타이핑과 동시 검색
+### 3. Rate Limiting
+- Thumbnail generation semaphore
+- Concurrent request limits
+- Memory usage monitoring
 
-### **UI/UX**
-- **즉시 피드백**: 버튼 상태 및 진행 표시
-- **키보드 단축키**: Ctrl/Shift 조합 지원
-- **컨텍스트 메뉴**: 우클릭으로 빠른 액세스
+## Scalability Features
 
-## 🔮 확장성 및 미래 계획
+### 1. Horizontal Scaling
+- Stateless API design
+- File-based data storage
+- Multi-worker support
 
-### **단기 계획**
-- **이미지 형식**: 추가 이미지 형식 지원
-- **검색 기능**: 메타데이터 기반 검색
-- **UI 개선**: 다크 모드, 테마 지원
+### 2. Vertical Scaling
+- Configurable thread pools
+- Adjustable cache sizes
+- Dynamic worker allocation
 
-### **장기 계획**
-- **데이터베이스**: SQLite/PostgreSQL 연동
-- **사용자 관리**: 로그인/권한 시스템
-- **API 확장**: 외부 시스템 연동
+### 3. Load Balancing
+- User activity prioritization
+- Background task scheduling
+- Request queuing
 
-## 🛠️ 개발 환경
+## Monitoring & Debugging
 
-### **필수 도구**
-- Python 3.7+
-- Node.js (개발 시)
-- 웹 브라우저 (Chrome, Firefox, Safari, Edge)
+### 1. Logging
+```python
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+```
 
-### **의존성**
-- **백엔드**: FastAPI, Pillow, uvicorn
-- **프론트엔드**: HTML5, CSS3, JavaScript ES6+
-- **개발 도구**: Git, VS Code (권장)
+### 2. Performance Metrics
+- Cache hit rates
+- Thumbnail generation time
+- Request latency
+
+### 3. Error Handling
+- Graceful degradation
+- Detailed error messages
+- Automatic recovery
+
+## Future Enhancements
+
+### Planned Features
+1. **WebSocket Support**: Real-time collaboration
+2. **Database Backend**: PostgreSQL for large datasets
+3. **Machine Learning**: Auto-classification with CNNs
+4. **Cloud Storage**: S3/Azure blob integration
+5. **Advanced Analytics**: Defect pattern analysis
+
+### Architecture Evolution
+1. **Microservices**: Separate thumbnail service
+2. **Message Queue**: Redis for job processing
+3. **CDN Integration**: CloudFlare for static assets
+4. **Container Orchestration**: Kubernetes deployment
+
+## Development Workflow
+
+### Local Development
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run with auto-reload
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8080
+```
+
+### Testing
+```bash
+# Unit tests
+pytest tests/
+
+# Integration tests
+pytest tests/integration/
+
+# Load testing
+locust -f tests/load/locustfile.py
+```
+
+### Deployment
+```bash
+# Production build
+docker build -t l3tracker .
+
+# Run container
+docker run -p 8080:8080 -v /data:/data l3tracker
+```
+
+## Dependencies
+
+### Python Packages
+- **FastAPI**: Web framework
+- **Pillow**: Image processing
+- **uvicorn**: ASGI server
+- **watchdog**: File monitoring
+
+### JavaScript Libraries
+- **No external dependencies**: Pure vanilla JS
+- **Future considerations**: React/Vue for complex UIs
+
+## API Design Principles
+
+### RESTful Conventions
+- GET for queries
+- POST for creation
+- DELETE for removal
+- Consistent URL patterns
+
+### Response Format
+```json
+{
+  "success": true,
+  "data": {},
+  "error": null,
+  "timestamp": "2024-12-27T10:00:00Z"
+}
+```
+
+### Error Handling
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Detailed error message",
+  "code": 400
+}
+```
 
 ---
 
-이 아키텍처를 통해 L3Tracker는 확장 가능하고 유지보수가 용이한 웨이퍼 맵 뷰어 및 라벨링 도구로 발전할 수 있습니다.
+This architecture is designed for maintainability, scalability, and performance, providing a solid foundation for semiconductor wafer map analysis and classification tasks.

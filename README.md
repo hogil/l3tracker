@@ -1,125 +1,220 @@
-# L3Tracker - Wafer Map Viewer & Labeling Tool
+# L3Tracker - Wafer Map Viewer & Classifier
 
-웨이퍼 맵 이미지를 탐색하고 라벨링할 수 있는 웹 기반 도구입니다.
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-green)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-## 🚀 주요 기능
+A high-performance web application for viewing, classifying, and managing semiconductor wafer map images with real-time file system monitoring.
 
-- **이미지 탐색**: 폴더 기반 이미지 탐색 및 미리보기
-- **그리드 뷰**: 다중 이미지 선택 시 자동 그리드 모드 전환
-- **라벨링 시스템**: 클래스 기반 이미지 라벨링 및 관리
-- **반응형 UI**: 모바일과 데스크톱 모두 지원
-- **실시간 검색**: 이미지 파일명 기반 빠른 검색
+## 🚀 Features
 
-## 📋 요구사항
+### Core Features
+- **Real-time File System Monitoring**: Instant reflection of file/folder changes without server restart
+- **Multi-mode Image Viewer**: Single image detail view and grid thumbnail view
+- **Interactive Pan & Zoom**: Smooth image navigation with minimap support
+- **Batch Processing**: Select and process multiple images simultaneously
+- **Smart Search**: Advanced search with OR/AND/NOT operators and parentheses support
 
-- Python 3.7+
-- 웨이퍼 맵 이미지 데이터셋 (wm-811k 등)
+### Classification System
+- **Dynamic Class Management**: Create, delete, and organize classification categories
+- **Label Explorer**: Visual organization of classified images
+- **Batch Classification**: Apply labels to multiple images at once
+- **Real-time Sync**: Automatic synchronization between file system and UI
 
-## 🛠️ 설치 및 실행
+### Performance Optimizations
+- **Intelligent Caching**: LRU cache for directory listings and thumbnails
+- **Concurrent Processing**: Multi-threaded thumbnail generation (8-32 threads)
+- **Memory Management**: Automatic cleanup of unused resources
+- **Progressive Loading**: Lazy loading for large directories
 
-### 1. 저장소 클론
+## 📋 Requirements
+
+- Python 3.8+
+- FastAPI 0.100+
+- Pillow for image processing
+- uvicorn for ASGI server
+- Wafer map dataset (e.g., wm-811k)
+
+## 🛠️ Quick Start
+
+### 1. Clone Repository
 ```bash
 git clone https://github.com/yourusername/l3tracker.git
 cd l3tracker
 ```
 
-### 2. 의존성 설치
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 데이터셋 준비
-웨이퍼 맵 이미지를 다음 경로에 배치하세요:
-```
-data/wm-811k/
-├── *.jpg
-├── *.png
-└── (기타 이미지 파일들)
+### 3. Configure Dataset Path
+Edit `api/config.py`:
+```python
+ROOT_DIR = Path("D:/project/data/wm-811k")  # Your dataset path
 ```
 
-### 4. 앱 실행
+### 4. Run Server
 ```bash
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+# Standard method
+uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+
+# Or with module
+python -m api.main
 ```
 
-### 5. 웹 브라우저 접속
-http://localhost:8000
+### 5. Open Browser
+Navigate to http://localhost:8080
 
-## 📁 프로젝트 구조
+## 📁 Project Structure
 
 ```
 l3tracker/
-├── api/                 # FastAPI 백엔드
-│   ├── main.py         # 메인 애플리케이션
-│   ├── config.py       # 설정 파일
+├── api/                    # Backend API
+│   ├── main.py            # FastAPI application with real-time updates
+│   ├── config.py          # Configuration settings
 │   └── __init__.py
-├── frontend/           # 프론트엔드 파일
-│   └── app.py         # Streamlit 앱 (선택사항)
-├── js/                 # JavaScript 모듈
-│   ├── main.js        # 메인 애플리케이션 로직
-│   ├── grid.js        # 그리드 뷰 기능
-│   ├── labels.js      # 라벨링 시스템
-│   ├── search.js      # 검색 기능
-│   └── utils.js       # 유틸리티 함수
-├── index.html          # 메인 HTML 파일
-├── requirements.txt    # Python 의존성
-├── README.md           # 프로젝트 문서
-├── ARCHITECTURE.md     # 아키텍처 설명
-└── CHANGELOG.md        # 변경 이력
+├── js/                    # Frontend JavaScript (modularized)
+│   ├── main.js           # Core application logic
+│   ├── grid.js          # Grid view functionality
+│   ├── labels.js        # Label management system
+│   ├── search.js        # Advanced search implementation
+│   └── utils.js         # Utility functions
+├── frontend/             # Optional frontend apps
+│   └── app.py           # Streamlit interface
+├── index.html           # Main HTML interface
+├── requirements.txt     # Python dependencies
+├── README.md           # This file
+├── ARCHITECTURE.md     # System architecture
+├── CHANGELOG.md        # Version history
+└── UBUNTU_SETUP.md     # Ubuntu deployment guide
 ```
 
-## 🎯 사용법
+## 🎯 Usage Guide
 
-### 이미지 탐색
-1. 좌측 사이드바에서 이미지 폴더 탐색
-2. 이미지 클릭으로 선택
-3. Ctrl+클릭으로 다중 선택
+### Image Navigation
+- **Single Click**: View image in detail mode
+- **Ctrl+Click**: Multi-select images
+- **Shift+Click**: Range selection
+- **Right Click**: Context menu for batch operations
 
-### 그리드 모드
-- 2개 이상 이미지 선택 시 자동 전환
-- 마우스 휠로 확대/축소
-- 드래그로 이미지 이동
+### Grid Mode Features
+- **Auto-switch**: Activates with 2+ selected images
+- **Ctrl+Wheel**: Adjust grid columns (1-10)
+- **Drag Select**: Box selection for multiple thumbnails
+- **Context Menu**: Download, merge, copy operations
 
-### 라벨링
-1. 우측 패널에서 클래스 추가
-2. 이미지 선택 후 라벨 적용
-3. 라벨 데이터 JSON 형식으로 내보내기
+### Classification Workflow
+1. **Create Classes**: Add classification categories in Class Manager
+2. **Select Images**: Choose images to classify
+3. **Apply Labels**: Click class button to label selected images
+4. **View Results**: Check Label Explorer for organized view
+5. **Export Data**: Labels saved in `labels/labels.json`
 
-### 검색
-- 파일명 기반 실시간 검색
-- 정규식 패턴 지원
+### Advanced Search
+```
+# Basic search
+wafer
 
-## 🔧 설정
+# AND operation
+wafer and defect
 
-`api/config.py`에서 다음 설정을 조정할 수 있습니다:
-- 이미지 데이터셋 경로
-- 지원 이미지 형식
-- 서버 포트 및 호스트
+# OR operation  
+good or pass
 
-## 📊 지원 형식
+# NOT operation
+not fail
 
-- **이미지**: JPG, PNG, BMP, GIF, TIFF, WebP
-- **데이터**: JSON, CSV
-- **브라우저**: Chrome, Firefox, Safari, Edge
+# Complex queries with parentheses
+(wafer or chip) and not (fail or defect)
+```
 
-## 🤝 기여하기
+## 🔧 Configuration
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Edit `api/config.py` for customization:
 
-## 📝 라이선스
+```python
+# Paths
+ROOT_DIR = Path("D:/project/data/wm-811k")
+THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
+LABELS_DIR = ROOT_DIR / "labels"
 
-이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
+# Performance
+IO_THREADS = 32  # Concurrent I/O operations
+THUMBNAIL_SEM = 32  # Simultaneous thumbnail generation
+DIRLIST_CACHE_SIZE = 1024  # Directory cache entries
 
-## 📞 지원
+# Image Settings
+THUMBNAIL_SIZE_DEFAULT = 512
+THUMBNAIL_FORMAT = "WEBP"
+THUMBNAIL_QUALITY = 100
+SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif'}
+```
 
-문제가 발생하거나 질문이 있으시면:
-- [Issues](https://github.com/yourusername/l3tracker/issues) 페이지에 등록
-- 프로젝트 문서 참조
+## 🚀 Performance Tips
+
+1. **Thumbnail Generation**: Pre-generate thumbnails for faster loading
+2. **Worker Processes**: Adjust `WORKERS` in config for your CPU
+3. **Cache Settings**: Increase cache sizes for larger datasets
+4. **Network**: Use `--host 0.0.0.0` for LAN access
+
+## 📊 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/files` | GET | List directory contents |
+| `/api/image` | GET | Serve full-size image |
+| `/api/thumbnail` | GET | Generate/serve thumbnail |
+| `/api/search` | GET | Search images by filename |
+| `/api/classes` | GET/POST/DELETE | Manage classification classes |
+| `/api/labels` | GET/POST/DELETE | Manage image labels |
+| `/api/classify` | POST | Classify image to class |
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Port Already in Use**
+   ```bash
+   # Change port
+   uvicorn api.main:app --port 8081
+   ```
+
+2. **Permission Denied**
+   ```bash
+   # Run with appropriate permissions
+   sudo uvicorn api.main:app --host 0.0.0.0 --port 80
+   ```
+
+3. **Slow Thumbnail Generation**
+   - Increase `IO_THREADS` in config
+   - Use SSD for dataset storage
+   - Pre-generate thumbnails
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- FastAPI for the excellent web framework
+- Pillow for image processing capabilities
+- The semiconductor industry for wafer map datasets
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/l3tracker/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/l3tracker/discussions)
+- **Email**: your.email@example.com
 
 ---
 
-⭐ 이 프로젝트가 도움이 되었다면 스타를 눌러주세요!
+⭐ Star this project if you find it helpful!
