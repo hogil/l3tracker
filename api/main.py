@@ -358,10 +358,22 @@ async def delayed_background_resume():
 
 # ========== 디렉터리 나열 ==========
 def list_dir_fast(target: Path) -> List[Dict[str, str]]:
+    # 특정 경로는 캐시하지 않고 항상 새로 읽기
+    # classification 관련 경로나 자주 변경되는 경로
+    no_cache_paths = ['classification', 'images', 'labels']
+    should_cache = True
+    
+    target_str = str(target).replace('\\', '/')
+    for no_cache in no_cache_paths:
+        if no_cache in target_str:
+            should_cache = False
+            break
+    
     key = str(target)
-    cached = DIRLIST_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if should_cache:
+        cached = DIRLIST_CACHE.get(key)
+        if cached is not None:
+            return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -375,7 +387,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
                 typ = "directory" if entry.is_dir(follow_symlinks=False) else "file"
                 items.append({"name": name, "type": typ})
         items.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
-        DIRLIST_CACHE.set(key, items)
+        if should_cache:
+            DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -464,6 +477,12 @@ async def get_files(path: Optional[str] = None):
         target = safe_resolve_path(path)
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
+        
+        # 특정 경로에 대해서는 캐시 무효화
+        target_str = str(target).replace('\\', '/')
+        if any(x in target_str for x in ['classification', 'images', 'labels']):
+            _dircache_invalidate(target)
+        
         return {"success": True, "items": list_dir_fast(target)}
     except HTTPException:
         raise
@@ -618,7 +637,10 @@ async def get_classes():
         _labels_reload_if_stale()
         _sync_labels_if_classes_changed()
 
+        # 캐시 무효화 - classification 디렉토리 항상 새로 읽기
         classification_dir = _classification_dir()
+        _dircache_invalidate(classification_dir)
+        
         if not classification_dir.exists():
             return {"success": True, "classes": []}
 
@@ -673,6 +695,11 @@ async def create_class(req: CreateClassReq):
         
         # mtime 변화로 동기화되지만, 즉시 목록 반영을 위해 캐시 무효화
         _dircache_invalidate(_classification_dir())
+        _dircache_invalidate(class_dir)
+        # ROOT_DIR 자체도 캐시 무효화
+        _dircache_invalidate(ROOT_DIR)
+        # 전체 캐시 클리어 - 즉시 반영 보장
+        DIRLIST_CACHE.clear()
         
         # 클래스 생성 후 즉시 Label Explorer 강제 새로고침
         logger.info(f"클래스 '{name}' 생성 완료 - Label Explorer 강제 새로고침 필요")
@@ -726,6 +753,10 @@ async def delete_class(
 
         # 캐시 무효화 및 mtime 반영
         _dircache_invalidate(_classification_dir())
+        _dircache_invalidate(class_dir)
+        _dircache_invalidate(ROOT_DIR)
+        # 전체 캐시 클리어 - 즉시 반영 보장
+        DIRLIST_CACHE.clear()
         
         # 클래스 삭제 후 즉시 Label Explorer 강제 새로고침
         logger.info(f"클래스 '{class_name}' 삭제 완료 - Label Explorer 강제 새로고침 필요")

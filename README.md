@@ -1,32 +1,43 @@
-# Wafer Map Viewer - 자동 설치 완료
+# L3Tracker - Wafer Map Viewer & Labeling Tool
 
-이 프로젝트는 자동으로 설치되었습니다. 아래 단계를 따라 실행하세요.
+웨이퍼 맵 이미지를 탐색하고 라벨링할 수 있는 웹 기반 도구입니다.
 
-## 🚀 빠른 시작
+## 🚀 주요 기능
 
-### 1. main.js 파일 다운로드 (필수)
-현재 main.js는 임시 파일입니다. 실제 파일을 다운로드해주세요:
+- **이미지 탐색**: 폴더 기반 이미지 탐색 및 미리보기
+- **그리드 뷰**: 다중 이미지 선택 시 자동 그리드 모드 전환
+- **라벨링 시스템**: 클래스 기반 이미지 라벨링 및 관리
+- **반응형 UI**: 모바일과 데스크톱 모두 지원
+- **실시간 검색**: 이미지 파일명 기반 빠른 검색
 
-1. 다음 링크에서 파일 다운로드: https://raw.githubusercontent.com/hogil/l3tracker/main/main.js
-2. 다운로드한 파일을 `D:\project\l3tracker\main.js`로 교체
+## 📋 요구사항
 
-### 2. 데이터셋 준비
-wm-811k 데이터셋을 다음 경로에 준비하세요:
+- Python 3.7+
+- 웨이퍼 맵 이미지 데이터셋 (wm-811k 등)
+
+## 🛠️ 설치 및 실행
+
+### 1. 저장소 클론
+```bash
+git clone https://github.com/yourusername/l3tracker.git
+cd l3tracker
 ```
-D:\project\data\wm-811k\
+
+### 2. 의존성 설치
+```bash
+pip install -r requirements.txt
+```
+
+### 3. 데이터셋 준비
+웨이퍼 맵 이미지를 다음 경로에 배치하세요:
+```
+data/wm-811k/
 ├── *.jpg
 ├── *.png
 └── (기타 이미지 파일들)
 ```
 
-### 3. Python 패키지 설치
-```bash
-cd D:\project\l3tracker
-pip install -r requirements.txt
-```
-
 ### 4. 앱 실행
-`run_app.bat` 파일을 더블클릭하여 실행하거나:
 ```bash
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
@@ -37,60 +48,78 @@ http://localhost:8000
 ## 📁 프로젝트 구조
 
 ```
-D:\project\l3tracker\
-├── api\
-│   ├── __init__.py
-│   ├── main.py          # 수정됨 (정적 파일 경로)
-│   ├── config.py        # 수정됨 (wm-811k 경로)
-│   └── utils.py
-├── index.html
-├── main.js              # ⚠️ 실제 파일로 교체 필요
-├── requirements.txt     # 업데이트됨
-├── run_app.bat         # 실행 스크립트
-└── README.md           # 이 파일
+l3tracker/
+├── api/                 # FastAPI 백엔드
+│   ├── main.py         # 메인 애플리케이션
+│   ├── config.py       # 설정 파일
+│   └── __init__.py
+├── frontend/           # 프론트엔드 파일
+│   └── app.py         # Streamlit 앱 (선택사항)
+├── js/                 # JavaScript 모듈
+│   ├── main.js        # 메인 애플리케이션 로직
+│   ├── grid.js        # 그리드 뷰 기능
+│   ├── labels.js      # 라벨링 시스템
+│   ├── search.js      # 검색 기능
+│   └── utils.js       # 유틸리티 함수
+├── index.html          # 메인 HTML 파일
+├── requirements.txt    # Python 의존성
+├── README.md           # 프로젝트 문서
+├── ARCHITECTURE.md     # 아키텍처 설명
+└── CHANGELOG.md        # 변경 이력
 ```
 
-## ⚙️ 주요 수정사항
+## 🎯 사용법
 
-1. **config.py**: ROOT_DIR을 `D:/project/data/wm-811k`로 변경
-2. **main.py**: 정적 파일 경로 수정 (PROJECT_ROOT 추가)
-3. **requirements.txt**: 필요한 패키지 추가
-4. **run_app.bat**: 편리한 실행을 위한 배치 파일
+### 이미지 탐색
+1. 좌측 사이드바에서 이미지 폴더 탐색
+2. 이미지 클릭으로 선택
+3. Ctrl+클릭으로 다중 선택
 
-## 🔧 문제 해결
+### 그리드 모드
+- 2개 이상 이미지 선택 시 자동 전환
+- 마우스 휠로 확대/축소
+- 드래그로 이미지 이동
 
-### main.js 파일 오류
-- GitHub에서 최신 main.js 파일을 다운로드하여 교체하세요
-- 파일 크기: 약 154KB (3554줄)
+### 라벨링
+1. 우측 패널에서 클래스 추가
+2. 이미지 선택 후 라벨 적용
+3. 라벨 데이터 JSON 형식으로 내보내기
 
-### 이미지가 보이지 않음
-- `D:\project\data\wm-811k` 경로에 이미지가 있는지 확인
-- 지원 형식: jpg, jpeg, png, bmp, gif, tiff, webp
+### 검색
+- 파일명 기반 실시간 검색
+- 정규식 패턴 지원
 
-### 모듈 오류
-```bash
-pip install -r requirements.txt
-```
+## 🔧 설정
 
-### 포트 충돌
-```bash
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8001
-```
+`api/config.py`에서 다음 설정을 조정할 수 있습니다:
+- 이미지 데이터셋 경로
+- 지원 이미지 형식
+- 서버 포트 및 호스트
 
-## 📝 사용법
+## 📊 지원 형식
 
-1. **파일 탐색**: 좌측 사이드바에서 이미지 폴더 탐색
-2. **이미지 선택**: 클릭으로 단일 선택, Ctrl+클릭으로 다중 선택
-3. **그리드 모드**: 2개 이상 선택 시 자동 전환
-4. **라벨링**: 우측 패널에서 클래스 추가 및 라벨링
-5. **확대/축소**: 마우스 휠 또는 컨트롤 버튼 사용
+- **이미지**: JPG, PNG, BMP, GIF, TIFF, WebP
+- **데이터**: JSON, CSV
+- **브라우저**: Chrome, Firefox, Safari, Edge
+
+## 🤝 기여하기
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📝 라이선스
+
+이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
 
 ## 📞 지원
 
-문제가 발생하면 다음을 확인하세요:
-1. Python 3.7 이상 설치 여부
-2. 모든 패키지 설치 완료 여부
-3. main.js 파일 교체 완료 여부
-4. 이미지 데이터셋 경로 확인
+문제가 발생하거나 질문이 있으시면:
+- [Issues](https://github.com/yourusername/l3tracker/issues) 페이지에 등록
+- 프로젝트 문서 참조
 
-즐거운 이미지 뷰잉과 라벨링 되세요! 🎉
+---
+
+⭐ 이 프로젝트가 도움이 되었다면 스타를 눌러주세요!
