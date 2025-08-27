@@ -2242,6 +2242,10 @@ class WaferMapViewer {
                 // 이미지가 표시된 후 컨테이너 rect가 변하는 경우 재계산
                 this.resetView(true);
             }, 0);
+            // 일부 레이아웃에서 늦게 적용되는 패딩/스크롤바 보정용 재맞춤 한 번 더
+            setTimeout(() => {
+                this.resetView(true);
+            }, 50);
         } catch (err) {
             console.error(`Failed to load image: ${path}`, err);
             this.dom.minimapContainer.style.display = 'none';
@@ -2292,17 +2296,20 @@ class WaferMapViewer {
     
     resetView(shouldDraw = true) {
         if (!this.currentImage) return;
-        const container = this.dom.viewerContainer.getBoundingClientRect();
+        const containerRect = this.dom.viewerContainer.getBoundingClientRect();
+        // 컨테이너 경계선/스크롤 영향으로 인한 미세 클리핑 방지용 보정치(2px)
+        const effectiveW = Math.max(0, containerRect.width - 2);
+        const effectiveH = Math.max(0, containerRect.height - 2);
         const imgRatio = this.currentImage.width / this.currentImage.height;
-        const containerRatio = container.width / container.height;
-        // 창 크기에 딱 맞추는 대신 1% 여유를 두어 가장자리 클리핑을 방지
+        const containerRatio = effectiveW / effectiveH;
         const fitScale = (imgRatio > containerRatio)
-            ? container.width / this.currentImage.width
-            : container.height / this.currentImage.height;
+            ? effectiveW / this.currentImage.width
+            : effectiveH / this.currentImage.height;
         // 여유 비율 2% 적용
         this.transform.scale = fitScale * 0.98;
-        this.transform.dx = (container.width - this.currentImage.width * this.transform.scale) / 2;
-        this.transform.dy = (container.height - this.currentImage.height * this.transform.scale) / 2; // 가운데 정렬
+        // 실제 센터링은 전체 컨테이너 크기 기준으로 적용 (시각적 중앙 정렬)
+        this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
+        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2;
         this.updateZoomDisplay();
         if (shouldDraw) this.scheduleDraw();
     }
