@@ -19,9 +19,9 @@ const ZOOM_FACTOR = 1.2;
 const THUMB_BATCH_SIZE = 20;
 const DEBOUNCE_DELAY = 0;
 // 초기 맞춤 여유 (상대 비율)
-const FIT_RELATIVE_MARGIN = 0.98; // 초기 로드 시 2% 여유
-// 리셋 시 절대 퍼센트포인트 오프셋 (예: -0.01 => 1%p 더 작게)
-const RESET_ABSOLUTE_PERCENT_OFFSET = -0.01;
+const FIT_RELATIVE_MARGIN = 0.96; // 초기 로드 시 4% 여유 (2% 더 작게)
+// 리셋 시 절대 퍼센트포인트 오프셋 (예: -0.02 => 2%p 더 작게)
+const RESET_ABSOLUTE_PERCENT_OFFSET = -0.02;
 
 /**
  * Thumbnail Manager
