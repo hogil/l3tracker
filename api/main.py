@@ -45,7 +45,7 @@ LOGGING_CONFIG = {
             "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "access": {
-            "format": "%(levelname)s: %(asctime)s     %(client_addr)s - \"%(request_line)s\" %(status_code)s",
+            "format": "%(levelname)s: %(asctime)s     %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         }
     },
