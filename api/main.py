@@ -33,7 +33,53 @@ from PIL import Image
 from . import config
 
 # ========== 로깅 ==========
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import logging.config
+
+# uvicorn 로깅 설정 (옵션 없이도 시간 표시)
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "format": "%(levelname)s: %(asctime)s     %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "access": {
+            "format": "%(levelname)s: %(asctime)s     %(client_addr)s - \"%(request_line)s\" %(status_code)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        }
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout"
+        },
+        "access": {
+            "formatter": "access", 
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout"
+        }
+    },
+    "loggers": {
+        "uvicorn": {
+            "handlers": ["default"],
+            "level": "INFO",
+            "propagate": False
+        },
+        "uvicorn.error": {
+            "level": "INFO"
+        },
+        "uvicorn.access": {
+            "handlers": ["access"],
+            "level": "INFO", 
+            "propagate": False
+        }
+    }
+}
+
+# 로깅 설정 적용
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("l3tracker")
 
 # ========== 설정 바인딩 ==========
