@@ -18,6 +18,10 @@ const MIN_DRAG_DISTANCE = 5;
 const ZOOM_FACTOR = 1.2;
 const THUMB_BATCH_SIZE = 20;
 const DEBOUNCE_DELAY = 0;
+// 초기 맞춤 여유 (상대 비율)
+const FIT_RELATIVE_MARGIN = 0.98; // 초기 로드 시 2% 여유
+// 리셋 시 절대 퍼센트포인트 오프셋 (예: -0.01 => 1%p 더 작게)
+const RESET_ABSOLUTE_PERCENT_OFFSET = -0.01;
 
 /**
  * Thumbnail Manager
@@ -365,7 +369,7 @@ class WaferMapViewer {
         if (this.dom.zoomOutBtn)
             this.dom.zoomOutBtn.addEventListener('click', () => this.zoomAtCenter(1 / ZOOM_FACTOR));
         if (this.dom.resetViewBtn)
-            this.dom.resetViewBtn.addEventListener('click', () => this.resetView());
+            this.dom.resetViewBtn.addEventListener('click', () => this.resetViewWithAbsoluteOffset());
         if (this.dom.zoom50Btn)
             this.dom.zoom50Btn.addEventListener('click', () => this.setZoom(0.5));
         if (this.dom.zoom100Btn)
@@ -2305,8 +2309,8 @@ class WaferMapViewer {
         const fitScale = (imgRatio > containerRatio)
             ? effectiveW / this.currentImage.width
             : effectiveH / this.currentImage.height;
-        // 여유 비율 2% 적용
-        this.transform.scale = fitScale * 0.98;
+        // 기본은 상대 여유 적용 (초기 로드 등 일반 맞춤)
+        this.transform.scale = fitScale * FIT_RELATIVE_MARGIN;
         // 실제 센터링은 전체 컨테이너 크기 기준으로 적용 (시각적 중앙 정렬)
         this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
         this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2;
@@ -2392,6 +2396,25 @@ class WaferMapViewer {
         const currentScale = this.transform.scale;
         const factor = scale / currentScale;
         this.zoomAtCenter(factor);
+    }
+
+    // 리셋 버튼 전용: 현재 컨테이너 대비 맞춤 스케일에서 절대 퍼센트포인트 오프셋 적용
+    resetViewWithAbsoluteOffset() {
+        if (!this.currentImage) return;
+        const containerRect = this.dom.viewerContainer.getBoundingClientRect();
+        const effectiveW = Math.max(0, containerRect.width - 2);
+        const effectiveH = Math.max(0, containerRect.height - 2);
+        const imgRatio = this.currentImage.width / this.currentImage.height;
+        const containerRatio = effectiveW / effectiveH;
+        const fitScale = (imgRatio > containerRatio)
+            ? effectiveW / this.currentImage.width
+            : effectiveH / this.currentImage.height;
+        // 절대 퍼센트포인트 오프셋: 예) -0.01 → fitScale의 99%
+        this.transform.scale = fitScale * (1 + RESET_ABSOLUTE_PERCENT_OFFSET);
+        this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
+        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2;
+        this.updateZoomDisplay();
+        this.scheduleDraw();
     }
     
     updateZoomDisplay() {
