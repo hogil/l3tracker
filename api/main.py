@@ -56,11 +56,49 @@ class ColoredFormatter(logging.Formatter):
         # 원래 포맷 적용
         formatted = super().format(record)
         
-        # 색상 적용: 레벨명만 색상 적용
+        # 색상 적용: 레벨명 색상 적용
         colored_level = f"{level_color}{record.levelname}{reset_color}"
         formatted = formatted.replace(record.levelname, colored_level, 1)
         
+        # HTTP 메서드와 상태 코드에 색상 추가
+        formatted = self._colorize_http_content(formatted)
+        
         return formatted
+    
+    def _colorize_http_content(self, text):
+        """HTTP 메서드와 상태 코드에 색상 적용"""
+        import re
+        
+        # HTTP 메서드 색상 적용
+        http_methods = {
+            'GET': '\033[96m',     # 밝은 청록색
+            'POST': '\033[93m',    # 밝은 노란색
+            'PUT': '\033[94m',     # 밝은 파란색
+            'DELETE': '\033[91m',  # 밝은 빨간색
+            'PATCH': '\033[95m',   # 밝은 자주색
+            'HEAD': '\033[92m',    # 밝은 초록색
+            'OPTIONS': '\033[97m'  # 밝은 흰색
+        }
+        
+        # HTTP 메서드 패턴 매칭 및 색상 적용
+        for method, color in http_methods.items():
+            pattern = f'"{method} '
+            if pattern in text:
+                colored_method = f'"{color}{method}\033[0m '
+                text = text.replace(pattern, colored_method)
+        
+        # 상태 코드 색상 적용 (200번대: 초록, 400번대: 노랑, 500번대: 빨강)
+        status_patterns = [
+            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 밝은 초록
+            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 밝은 파랑
+            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 밝은 노랑
+            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 밝은 빨강
+        ]
+        
+        for pattern, replacement in status_patterns:
+            text = re.sub(pattern, replacement, text)
+        
+        return text
 
 # uvicorn 로깅 설정 (옵션 없이도 시간 표시 + 색상)
 LOGGING_CONFIG = {
