@@ -779,10 +779,11 @@ class WaferMapViewer {
                     
                     this.displayFoldersAsIcons(folders);
                     
-                    // 루트 경로 표시
+                    // 루트 경로 표시 (이미지 폴더명)
                     const currentFolderText = document.getElementById('current-folder-text');
                     if (currentFolderText) {
-                        currentFolderText.textContent = '/';
+                        const imageFolderName = imageRoot.split('/').pop() || 'root';
+                        currentFolderText.textContent = imageFolderName;
                     }
                     this.currentBrowserPath = imageRoot;
                     return;
@@ -803,10 +804,11 @@ class WaferMapViewer {
                     
                     this.displayFoldersAsIcons(folders);
                     
-                    // 루트 경로 표시
+                    // 루트 경로 표시 (폴백)
                     const currentFolderText = document.getElementById('current-folder-text');
                     if (currentFolderText) {
-                        currentFolderText.textContent = '/';
+                        const folderName = (this.currentFolderPath || '').replace(/\\/g, '/').split('/').pop() || 'root';
+                        currentFolderText.textContent = folderName;
                     }
                     this.currentBrowserPath = this.currentFolderPath || '';
                     return;
@@ -820,7 +822,7 @@ class WaferMapViewer {
             folders.sort((a,b)=> (b.name||'').toLowerCase().localeCompare((a.name||'').toLowerCase()));
             this.displayFoldersAsIcons(folders);
             
-            // 현재 경로를 상대경로로 표시 (이미지 폴더를 루트로)
+            // 현재 경로를 이미지 폴더명부터 표시
             const currentFolderText = document.getElementById('current-folder-text');
             if (currentFolderText) {
                 // 설정된 루트 폴더 경로 가져오기
@@ -830,16 +832,21 @@ class WaferMapViewer {
                     const imageRoot = rootData.root_folder.replace(/\\/g, '/');
                     const currentPath = path.replace(/\\/g, '/');
                     
+                    // 이미지 폴더명 추출 (경로의 마지막 부분)
+                    const imageFolderName = imageRoot.split('/').pop() || 'root';
+                    
                     if (currentPath === imageRoot) {
-                        currentFolderText.textContent = '/';
+                        currentFolderText.textContent = imageFolderName;
                     } else if (currentPath.startsWith(imageRoot)) {
                         const relativePath = currentPath.substring(imageRoot.length).replace(/^\//, '');
-                        currentFolderText.textContent = relativePath ? `/${relativePath}` : '/';
+                        currentFolderText.textContent = relativePath ? `${imageFolderName}/${relativePath}` : imageFolderName;
                     } else {
-                        currentFolderText.textContent = '/';
+                        currentFolderText.textContent = imageFolderName;
                     }
                 } else {
-                    currentFolderText.textContent = path;
+                    // 폴백: 경로의 마지막 부분만 표시
+                    const folderName = path.replace(/\\/g, '/').split('/').pop() || path;
+                    currentFolderText.textContent = folderName;
                 }
             }
             this.currentBrowserPath = path;
