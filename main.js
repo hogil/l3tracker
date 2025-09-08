@@ -502,8 +502,14 @@ class WaferMapViewer {
     // 파일 탐색기에서 하위 폴더 목록 로드 (항상 이미지 폴더 최상위 기준)
     async loadSubfoldersFromFileExplorer() {
         try {
-            // 항상 이미지 폴더의 최상위 하위 폴더들을 가져오기 위해 하드코딩된 경로 사용
-            const imageRootPath = 'D:/project/data/wm-811k';
+            // 현재 루트 이미지 폴더 경로를 API에서 가져오기
+            const rootResponse = await fetch('/api/current-folder');
+            if (!rootResponse.ok) {
+                throw new Error(`Failed to get root folder: ${rootResponse.status}`);
+            }
+            const rootData = await rootResponse.json();
+            const imageRootPath = rootData.current_folder;
+            
             const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(imageRootPath)}`);
             
             if (!response.ok) {
@@ -531,7 +537,7 @@ class WaferMapViewer {
                 
                 // 최상위 폴더로 가기 옵션 추가
                 const rootOption = document.createElement('option');
-                rootOption.value = 'D:/project/data/wm-811k';
+                rootOption.value = imageRootPath;
                 rootOption.textContent = '🏠 최상위 폴더';
                 rootOption.style.backgroundColor = '#444';
                 rootOption.style.color = '#fff';
@@ -1356,12 +1362,20 @@ class WaferMapViewer {
     // 이미지 폴더 최상위로 리셋
     async resetToImageFolder() {
         try {
+            // 현재 루트 이미지 폴더 경로를 API에서 가져오기
+            const rootResponse = await fetch('/api/current-folder');
+            if (!rootResponse.ok) {
+                throw new Error(`Failed to get root folder: ${rootResponse.status}`);
+            }
+            const rootData = await rootResponse.json();
+            const imageRootPath = rootData.current_folder;
+            
             const response = await fetch('/api/change-folder', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ path: 'D:/project/data/wm-811k' })
+                body: JSON.stringify({ path: imageRootPath })
             });
             
             const result = await response.json();
