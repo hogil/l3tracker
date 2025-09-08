@@ -502,13 +502,13 @@ class WaferMapViewer {
     // 파일 탐색기에서 하위 폴더 목록 로드 (항상 이미지 폴더 최상위 기준)
     async loadSubfoldersFromFileExplorer() {
         try {
-            // 현재 루트 이미지 폴더 경로를 API에서 가져오기
-            const rootResponse = await fetch('/api/current-folder');
+            // 설정된 루트 이미지 폴더 경로를 API에서 가져오기
+            const rootResponse = await fetch('/api/root-folder');
             if (!rootResponse.ok) {
                 throw new Error(`Failed to get root folder: ${rootResponse.status}`);
             }
             const rootData = await rootResponse.json();
-            const imageRootPath = rootData.current_folder;
+            const imageRootPath = rootData.root_folder;
             
             const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(imageRootPath)}`);
             
@@ -624,14 +624,36 @@ class WaferMapViewer {
     }
 
     // 폴더 브라우저 표시
-    showFolderBrowser() {
+    async showFolderBrowser() {
         const modal = document.getElementById('folder-browser-modal');
         if (!modal) return;
         modal.style.display = 'flex';
-        const input = modal.querySelector('#folder-path-input');
-        if (input) input.value = this.currentFolderPath || '';
-        this.currentBrowserPath = this.currentFolderPath || '';
-        this.loadFolderBrowser(this.currentFolderPath);
+        
+        try {
+            // 설정된 루트 폴더에서 시작
+            const rootResponse = await fetch('/api/root-folder');
+            if (rootResponse.ok) {
+                const rootData = await rootResponse.json();
+                const imageRoot = rootData.root_folder;
+                const input = modal.querySelector('#folder-path-input');
+                if (input) input.value = imageRoot;
+                this.currentBrowserPath = imageRoot;
+                this.loadFolderBrowser(imageRoot);
+            } else {
+                // 폴백: 현재 폴더 사용
+                const input = modal.querySelector('#folder-path-input');
+                if (input) input.value = this.currentFolderPath || '';
+                this.currentBrowserPath = this.currentFolderPath || '';
+                this.loadFolderBrowser(this.currentFolderPath);
+            }
+        } catch (error) {
+            console.error('폴더 브라우저 초기화 실패:', error);
+            // 폴백: 현재 폴더 사용
+            const input = modal.querySelector('#folder-path-input');
+            if (input) input.value = this.currentFolderPath || '';
+            this.currentBrowserPath = this.currentFolderPath || '';
+            this.loadFolderBrowser(this.currentFolderPath);
+        }
     }
 
     // 폴더 브라우저 이벤트 설정
@@ -665,37 +687,59 @@ class WaferMapViewer {
             }
         });
 
-        // 루트로 이동 (현재 이미지폴더)
+        // 루트로 이동 (설정된 이미지폴더)
         const rootBtn = modal.querySelector('#folder-root-btn');
         if (rootBtn) {
-            rootBtn.addEventListener('click', () => {
-                this.loadFolderBrowser(this.currentFolderPath);
-                const input = modal.querySelector('#folder-path-input');
-                if (input) input.value = this.currentFolderPath || '';
+            rootBtn.addEventListener('click', async () => {
+                try {
+                    // 설정된 루트 폴더 경로 가져오기
+                    const rootResponse = await fetch('/api/root-folder');
+                    if (rootResponse.ok) {
+                        const rootData = await rootResponse.json();
+                        const imageRoot = rootData.root_folder;
+                        this.loadFolderBrowser(imageRoot);
+                        const input = modal.querySelector('#folder-path-input');
+                        if (input) input.value = imageRoot;
+                    }
+                } catch (error) {
+                    console.error('루트 이동 실패:', error);
+                }
             });
         }
 
         // 상위 폴더로 이동 (이미지폴더보다 위로는 제한)
         const upBtn = modal.querySelector('#folder-up-btn');
         if (upBtn) {
-            upBtn.addEventListener('click', () => {
-                const currentPath = this.currentBrowserPath || this.currentFolderPath || '';
-                const imageRoot = (this.currentFolderPath || '').replace(/\\/g, '/');
-                const current = currentPath.replace(/\\/g, '/');
-                
-                if (!current || current === imageRoot) return; // 루트에서는 위로 갈 수 없음
-                
-                const parent = current.replace(/\/$/,'').split('/').slice(0,-1).join('/');
-                
-                // 이미지 루트보다 위로는 갈 수 없음
-                if (parent.length < imageRoot.length) {
-                    this.loadFolderBrowser(imageRoot);
-                    const input = modal.querySelector('#folder-path-input');
-                    if (input) input.value = imageRoot;
-                } else {
-                    this.loadFolderBrowser(parent);
-                    const input = modal.querySelector('#folder-path-input');
-                    if (input) input.value = parent;
+            upBtn.addEventListener('click', async () => {
+                try {
+                    // 설정된 루트 폴더 경로 가져오기
+                    const rootResponse = await fetch('/api/root-folder');
+                    if (!rootResponse.ok) {
+                        console.error('루트 폴더 정보를 가져올 수 없습니다');
+                        return;
+                    }
+                    const rootData = await rootResponse.json();
+                    const imageRoot = rootData.root_folder.replace(/\\/g, '/');
+                    
+                    const currentPath = this.currentBrowserPath || '';
+                    const current = currentPath.replace(/\\/g, '/');
+                    
+                    if (!current || current === imageRoot) return; // 루트에서는 위로 갈 수 없음
+                    
+                    const parent = current.replace(/\/$/,'').split('/').slice(0,-1).join('/');
+                    
+                    // 이미지 루트보다 위로는 갈 수 없음
+                    if (parent.length < imageRoot.length || !parent.startsWith(imageRoot)) {
+                        this.loadFolderBrowser(imageRoot);
+                        const input = modal.querySelector('#folder-path-input');
+                        if (input) input.value = imageRoot;
+                    } else {
+                        this.loadFolderBrowser(parent);
+                        const input = modal.querySelector('#folder-path-input');
+                        if (input) input.value = parent;
+                    }
+                } catch (error) {
+                    console.error('위로 이동 실패:', error);
                 }
             });
         }
@@ -715,30 +759,58 @@ class WaferMapViewer {
     // 폴더 브라우저 로드
     async loadFolderBrowser(path = '') {
         try {
-            // path가 없으면 현재 이미지폴더의 하위폴더들을 가져오기
+            // path가 없으면 설정된 루트 이미지폴더의 하위폴더들을 가져오기
             if (!path) {
-                const response = await fetch('/api/files');
-                const data = await response.json();
-                const items = data.items || [];
-                
-                const folders = items
-                    .filter(item => item.type === 'directory')
-                    .filter(folder => 
-                        folder.name !== 'classification' && 
-                        folder.name !== 'thumbnails' &&
-                        folder.name !== 'labels'
-                    )
-                    .sort((a, b) => b.name.toLowerCase().localeCompare(a.name.toLowerCase()));
-                
-                this.displayFoldersAsIcons(folders);
-                
-                // 루트 경로 표시
-                const currentFolderText = document.getElementById('current-folder-text');
-                if (currentFolderText) {
-                    currentFolderText.textContent = '/';
+                // 설정된 루트 폴더 사용
+                const rootResponse = await fetch('/api/root-folder');
+                if (rootResponse.ok) {
+                    const rootData = await rootResponse.json();
+                    const imageRoot = rootData.root_folder;
+                    
+                    const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(imageRoot)}`);
+                    const data = await response.json();
+                    const folders = (data.folders || [])
+                        .filter(folder => 
+                            folder.name !== 'classification' && 
+                            folder.name !== 'thumbnails' &&
+                            folder.name !== 'labels'
+                        )
+                        .sort((a, b) => b.name.toLowerCase().localeCompare(a.name.toLowerCase()));
+                    
+                    this.displayFoldersAsIcons(folders);
+                    
+                    // 루트 경로 표시
+                    const currentFolderText = document.getElementById('current-folder-text');
+                    if (currentFolderText) {
+                        currentFolderText.textContent = '/';
+                    }
+                    this.currentBrowserPath = imageRoot;
+                    return;
+                } else {
+                    // 폴백: 기존 방식
+                    const response = await fetch('/api/files');
+                    const data = await response.json();
+                    const items = data.items || [];
+                    
+                    const folders = items
+                        .filter(item => item.type === 'directory')
+                        .filter(folder => 
+                            folder.name !== 'classification' && 
+                            folder.name !== 'thumbnails' &&
+                            folder.name !== 'labels'
+                        )
+                        .sort((a, b) => b.name.toLowerCase().localeCompare(a.name.toLowerCase()));
+                    
+                    this.displayFoldersAsIcons(folders);
+                    
+                    // 루트 경로 표시
+                    const currentFolderText = document.getElementById('current-folder-text');
+                    if (currentFolderText) {
+                        currentFolderText.textContent = '/';
+                    }
+                    this.currentBrowserPath = this.currentFolderPath || '';
+                    return;
                 }
-                this.currentBrowserPath = this.currentFolderPath || '';
-                return;
             }
             
             const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(path)}`);
@@ -751,16 +823,23 @@ class WaferMapViewer {
             // 현재 경로를 상대경로로 표시 (이미지 폴더를 루트로)
             const currentFolderText = document.getElementById('current-folder-text');
             if (currentFolderText) {
-                const imageRoot = (this.currentFolderPath || '').replace(/\\/g, '/');
-                const currentPath = path.replace(/\\/g, '/');
-                
-                if (currentPath === imageRoot) {
-                    currentFolderText.textContent = '/';
-                } else if (currentPath.startsWith(imageRoot)) {
-                    const relativePath = currentPath.substring(imageRoot.length).replace(/^\//, '');
-                    currentFolderText.textContent = relativePath ? `/${relativePath}` : '/';
+                // 설정된 루트 폴더 경로 가져오기
+                const rootResponse = await fetch('/api/root-folder');
+                if (rootResponse.ok) {
+                    const rootData = await rootResponse.json();
+                    const imageRoot = rootData.root_folder.replace(/\\/g, '/');
+                    const currentPath = path.replace(/\\/g, '/');
+                    
+                    if (currentPath === imageRoot) {
+                        currentFolderText.textContent = '/';
+                    } else if (currentPath.startsWith(imageRoot)) {
+                        const relativePath = currentPath.substring(imageRoot.length).replace(/^\//, '');
+                        currentFolderText.textContent = relativePath ? `/${relativePath}` : '/';
+                    } else {
+                        currentFolderText.textContent = '/';
+                    }
                 } else {
-                    currentFolderText.textContent = '/';
+                    currentFolderText.textContent = path;
                 }
             }
             this.currentBrowserPath = path;
@@ -1362,13 +1441,13 @@ class WaferMapViewer {
     // 이미지 폴더 최상위로 리셋
     async resetToImageFolder() {
         try {
-            // 현재 루트 이미지 폴더 경로를 API에서 가져오기
-            const rootResponse = await fetch('/api/current-folder');
+            // 설정된 루트 이미지 폴더 경로를 API에서 가져오기
+            const rootResponse = await fetch('/api/root-folder');
             if (!rootResponse.ok) {
                 throw new Error(`Failed to get root folder: ${rootResponse.status}`);
             }
             const rootData = await rootResponse.json();
-            const imageRootPath = rootData.current_folder;
+            const imageRootPath = rootData.root_folder;
             
             const response = await fetch('/api/change-folder', {
                 method: 'POST',

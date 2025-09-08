@@ -1267,8 +1267,14 @@ async def shutdown_event():
 # ========== 폴더 경로 관리 ==========
 @app.get("/api/current-folder")
 async def get_current_folder():
-    """현재 이미지 폴더 경로를 반환합니다."""
+    """현재 작업 폴더 경로를 반환합니다."""
     return {"current_folder": str(ROOT_DIR)}
+
+@app.get("/api/root-folder")
+async def get_root_folder():
+    """설정된 루트 폴더 경로를 반환합니다 (config.py ROOT_DIR)."""
+    from .config import ROOT_DIR as ORIGINAL_ROOT_DIR
+    return {"root_folder": str(ORIGINAL_ROOT_DIR)}
 
 @app.post("/api/change-folder")
 async def change_folder(request: Request):
