@@ -15,6 +15,7 @@
             --accent-color: #007acc;
             --hover-color: #0099ff;
             --selected-color: #005f9e;
+            --filename-bar-height: 56px;
         }
         
         * {
@@ -353,7 +354,7 @@
             width: 100%;
             text-align: center;
             color: #bbb;
-            font-size: 11px;
+            font-size: 13px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -397,9 +398,9 @@
             margin: 0;
             position: absolute;
             left: 0;
-            top: 0;
+            top: var(--filename-bar-height);
             width: 100%;
-            height: 100%;
+            height: calc(100% - var(--filename-bar-height));
             background: #000 !important;
             transform-origin: 0 0;
             z-index: 1;
@@ -423,7 +424,7 @@
             position: absolute;
             top: 10px;
             right: 10px;
-            z-index: 10;
+            z-index: 20;
             display: flex;
             align-items: center;
             background-color: var(--panel-color);
@@ -467,7 +468,7 @@
             height: 180px;
             border: 1px solid var(--border-color);
             background-color: rgba(37, 37, 38, 0.8);
-            z-index: 10;
+            z-index: 20;
             display: none;
         }
         
@@ -747,7 +748,21 @@
     <main class="app-container">
         <!-- Left Sidebar -->
         <aside class="sidebar" aria-label="파일 탐색기">
-            <header class="panel-header">Wafer Map Explorer</header>
+            <header class="panel-header">
+                <span>Wafer Map Explorer</span>
+                <button id="change-folder-btn" class="grid-btn" style="margin-left: auto; padding: 4px 8px; font-size: 12px;" aria-label="폴더 변경">📁</button>
+            </header>
+            
+            <!-- Folder Selection -->
+            <div id="folder-selection" style="padding: 8px 12px; background: #2a2a2a; border-bottom: 1px solid #444;">
+                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                    <select id="subfolder-select" style="flex: 1; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 6px 8px; font-size: 18px; font-weight: 500;">
+                        <option value="">제품 선택</option>
+                    </select>
+                    <button id="browse-folder-btn" class="grid-btn" style="padding: 4px 8px; font-size: 12px;" aria-label="폴더 찾기">🔍</button>
+                </div>
+            </div>
+            
             <nav id="file-explorer" aria-label="폴더 및 파일 목록">
                 <p style="padding: 10px; color: var(--text-secondary-color);">Loading files...</p>
             </nav>
@@ -791,6 +806,38 @@
                 <!-- Single Image Mode -->
                 <canvas id="image-canvas" aria-label="메인 이미지"></canvas>
                 <canvas id="overlay-canvas" aria-label="오버레이"></canvas>
+                
+                <!-- File Name Display (Top reserved bar) -->
+                <div id="file-name-display" style="
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: var(--filename-bar-height);
+                    background: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.55));
+                    color: white;
+                    display: none;
+                    z-index: 15;
+                    border-bottom: 1px solid rgba(255,255,255,0.08);
+                ">
+                    <div style="
+                        height: 100%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 10px;
+                        padding: 0 18px;
+                        font-weight: 600;
+                        font-size: 18px;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    ">
+                        <span id="file-name-text" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
+                        <span style="opacity: 0.6;">—</span>
+                        <span id="file-path-text" style="font-size: 14px; color: #ccc; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
+                    </div>
+                </div>
                 
                 <!-- Minimap -->
                 <div id="minimap-container" aria-label="미니맵">
@@ -863,6 +910,36 @@
                     <div class="context-menu-item" id="context-cancel" style="padding: 8px 12px; color: #aaa; cursor: pointer; font-size: 14px;">
                         ❌ 취소
                     </div>
+    </div>
+
+    <!-- Folder Browser Modal -->
+    <div id="folder-browser-modal" class="modal-overlay">
+        <div class="modal-content" style="min-width: 600px; max-width: 800px;">
+            <div class="modal-header">
+                <div class="modal-title">폴더 선택</div>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+                    <input type="text" id="folder-path-input" class="class-dropdown" placeholder="폴더 경로 입력..." style="flex: 1;">
+                    <button id="go-to-folder-btn" class="grid-btn">이동</button>
+                    <button id="folder-root-btn" class="grid-btn" title="이미지 폴더 루트로">루트</button>
+                    <button id="folder-up-btn" class="grid-btn" title="상위 폴더로">위로</button>
+                </div>
+                <div id="current-folder-path" style="color: var(--text-secondary-color); font-size: 12px; margin-bottom: 10px;">
+                    현재 경로: <span id="current-folder-text"></span>
+                </div>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; background: var(--bg-color);">
+                <div id="folder-list">
+                    <p style="color: var(--text-secondary-color); text-align: center; padding: 20px;">폴더를 로딩 중...</p>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="folder-browser-cancel" class="grid-btn">취소</button>
+                <button id="folder-browser-select" class="grid-btn">선택</button>
+            </div>
+        </div>
     </div>
 
     <!-- Add Label Modal -->

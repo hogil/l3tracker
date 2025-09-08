@@ -263,6 +263,11 @@ class WaferMapViewer {
             zoom300Btn: document.getElementById('zoom-300-btn'),
             wrapperRight: document.querySelector('.wrapper-right'),
             overlayCanvas: document.getElementById('overlay-canvas'),
+            fileNameDisplay: document.getElementById('file-name-display'),
+            fileNameText: document.getElementById('file-name-text'),
+            filePathText: document.getElementById('file-path-text'),
+            subfolderSelect: document.getElementById('subfolder-select'),
+            browseFolderBtn: document.getElementById('browse-folder-btn'),
             addClassBtn: document.getElementById('add-class-btn'),
             newClassInput: document.getElementById('new-class-input'),
             classList: document.getElementById('class-list'),
@@ -301,6 +306,8 @@ class WaferMapViewer {
         this.gridMode = false;
         this.gridCols = DEFAULT_GRID_COLS;
         this.gridThumbSize = DEFAULT_THUMB_SIZE;
+        this.currentFolderPath = '';
+        this.selectedFolderForBrowser = '';
 
         // 전역 파일 인덱스 (폴더를 열지 않아도 검색 가능)
         this.allFilesIndex = null; // string[] (ROOT 기준 상대경로, posix)
@@ -421,9 +428,434 @@ class WaferMapViewer {
             this.dom.minimapContainer.style.display = 'none';
         }
         
+        // 파일명 표시 숨기기
+        this.hideFileName();
+        
         // 뷰어 컨테이너 클래스 제거
         if (this.dom.viewerContainer) {
             this.dom.viewerContainer.classList.remove('single-image-mode');
+        }
+    }
+
+    // 파일명 표시
+    showFileName(path) {
+        if (this.dom.fileNameDisplay && this.dom.fileNameText && this.dom.filePathText) {
+            const fileName = path.split('/').pop() || path.split('\\').pop() || path;
+            this.dom.fileNameText.textContent = fileName;
+            
+            // 이미지폴더 root부터 상대경로로 표시
+            const relativePath = this.getRelativePathFromImageFolder(path);
+            this.dom.filePathText.textContent = relativePath;
+            this.dom.fileNameDisplay.style.display = 'block';
+            // 상단 바가 보이도록 캔버스 높이는 CSS 변수로 이미 확보됨
+        }
+    }
+
+    // 이미지폴더 root부터 상대경로 계산
+    getRelativePathFromImageFolder(fullPath) {
+        if (!this.currentFolderPath) return fullPath;
+        
+        try {
+            const fullPathObj = new URL(fullPath, 'file://').pathname;
+            const currentPathObj = new URL(this.currentFolderPath, 'file://').pathname;
+            
+            if (fullPathObj.startsWith(currentPathObj)) {
+                return fullPathObj.substring(currentPathObj.length).replace(/^[\/\\]/, '');
+            }
+        } catch (e) {
+            // URL 파싱 실패 시 단순 문자열 처리
+            const normalizedFull = fullPath.replace(/\\/g, '/');
+            const normalizedCurrent = this.currentFolderPath.replace(/\\/g, '/');
+            
+            if (normalizedFull.startsWith(normalizedCurrent)) {
+                return normalizedFull.substring(normalizedCurrent.length).replace(/^[\/\\]/, '');
+            }
+        }
+        
+        return fullPath;
+    }
+
+    // 현재 경로 업데이트
+    async updateCurrentPath() {
+        try {
+            const response = await fetch('/api/current-folder');
+            const data = await response.json();
+            this.currentFolderPath = data.current_folder;
+            
+            // 하위폴더 목록 업데이트
+            await this.updateSubfolderList();
+        } catch (error) {
+            console.error('현재 경로 업데이트 실패:', error);
+        }
+    }
+
+    // 하위 폴더 목록 업데이트
+    async updateSubfolderList() {
+        try {
+            // 항상 파일 탐색기에서 직접 가져오기
+            await this.loadSubfoldersFromFileExplorer();
+        } catch (error) {
+            console.error('하위 폴더 목록 업데이트 실패:', error);
+        }
+    }
+
+    // 파일 탐색기에서 하위 폴더 목록 로드 (항상 이미지 폴더 최상위 기준)
+    async loadSubfoldersFromFileExplorer() {
+        try {
+            // 항상 이미지 폴더의 최상위 하위 폴더들을 가져오기 위해 하드코딩된 경로 사용
+            const imageRootPath = 'D:/project/data/wm-811k';
+            const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(imageRootPath)}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log('Browse folders response:', data); // 디버깅용
+            
+            const folders = data.folders || [];
+            
+            // 폴더 필터링 (API에서 이미 내림차순 정렬됨)
+            const filteredFolders = folders
+                .filter(folder => 
+                    folder.name !== 'classification' && 
+                    folder.name !== 'thumbnails' &&
+                    folder.name !== 'labels'
+                );
+            
+            if (this.dom.subfolderSelect) {
+                // 현재 선택된 제품명을 유지
+                const currentText = this.selectedProductName || '제품 선택';
+                
+                this.dom.subfolderSelect.innerHTML = `<option value="">${currentText}</option>`;
+                
+                // 최상위 폴더로 가기 옵션 추가
+                const rootOption = document.createElement('option');
+                rootOption.value = 'D:/project/data/wm-811k';
+                rootOption.textContent = '🏠 최상위 폴더';
+                rootOption.style.backgroundColor = '#444';
+                rootOption.style.color = '#fff';
+                this.dom.subfolderSelect.appendChild(rootOption);
+                
+                // 구분선 추가
+                const separatorOption = document.createElement('option');
+                separatorOption.disabled = true;
+                separatorOption.textContent = '──────────────';
+                separatorOption.style.color = '#666';
+                this.dom.subfolderSelect.appendChild(separatorOption);
+                
+                filteredFolders.forEach(folder => {
+                    const option = document.createElement('option');
+                    // folder.path를 사용 (API에서 반환하는 전체 경로)
+                    option.value = folder.path;
+                    option.textContent = folder.name;
+                    this.dom.subfolderSelect.appendChild(option);
+                });
+                
+                console.log(`하위 폴더 ${filteredFolders.length}개 로드됨`); // 디버깅용
+            }
+        } catch (error) {
+            console.error('파일 탐색기에서 폴더 로드 실패:', error);
+        }
+    }
+
+    // 하위 폴더 선택 처리
+    async onSubfolderSelect(event) {
+        const selectedPath = event.target.value;
+        const selectedText = event.target.options[event.target.selectedIndex].text;
+        
+        if (!selectedPath) {
+            // 기본 선택으로 돌아갔을 때
+            this.selectedProductName = null;
+            return;
+        }
+        
+        // 선택된 제품명 저장 (최상위 폴더인 경우 특별 처리)
+        if (selectedText === '🏠 최상위 폴더') {
+            this.selectedProductName = '최상위 폴더';
+        } else {
+            this.selectedProductName = selectedText;
+        }
+        
+        // 폴더 변경
+        await this.changeFolder(selectedPath);
+    }
+
+    // 폴더 변경
+    async changeFolder(newPath) {
+        try {
+            const response = await fetch('/api/change-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ path: newPath })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // 폴더 변경 시 선택된 이미지들과 그리드 상태 초기화
+                this.selectedImages = [];
+                this.gridSelectedIdxs = [];
+                this.selectedImagePath = '';
+                
+                // 그리드 모드와 단일 이미지 모드 숨기기
+                this.hideGrid();
+                this.hideImage();
+                
+                await this.updateCurrentPath();
+                this.loadDirectoryContents(null, this.dom.fileExplorer);
+                await this.refreshClassList();
+                await this.refreshLabelExplorer();
+                // 폴더 변경 메시지 제거
+            } else {
+                this.showToast('폴더 변경에 실패했습니다.');
+            }
+        } catch (error) {
+            console.error('폴더 변경 실패:', error);
+            this.showToast('폴더 변경에 실패했습니다.');
+        }
+    }
+
+    // 폴더 브라우저 표시
+    showFolderBrowser() {
+        const modal = document.getElementById('folder-browser-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        const input = modal.querySelector('#folder-path-input');
+        if (input) input.value = this.currentFolderPath || '';
+        this.currentBrowserPath = this.currentFolderPath || '';
+        this.loadFolderBrowser(this.currentFolderPath);
+    }
+
+    // 폴더 브라우저 이벤트 설정
+    setupFolderBrowserEvents() {
+        const modal = document.getElementById('folder-browser-modal');
+        if (!modal) return;
+
+        // 모달 닫기
+        modal.querySelector('.modal-close').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        modal.querySelector('#folder-browser-cancel').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        // 폴더 선택
+        modal.querySelector('#folder-browser-select').addEventListener('click', async () => {
+            if (this.selectedFolderForBrowser) {
+                await this.changeFolder(this.selectedFolderForBrowser);
+                modal.style.display = 'none';
+            }
+        });
+
+        // 경로 입력으로 이동
+        modal.querySelector('#go-to-folder-btn').addEventListener('click', () => {
+            const pathInput = modal.querySelector('#folder-path-input');
+            const path = pathInput.value.trim();
+            if (path) {
+                this.loadFolderBrowser(path);
+            }
+        });
+
+        // 루트로 이동 (현재 이미지폴더)
+        const rootBtn = modal.querySelector('#folder-root-btn');
+        if (rootBtn) {
+            rootBtn.addEventListener('click', () => {
+                this.loadFolderBrowser(this.currentFolderPath);
+                const input = modal.querySelector('#folder-path-input');
+                if (input) input.value = this.currentFolderPath || '';
+            });
+        }
+
+        // 상위 폴더로 이동 (이미지폴더보다 위로는 제한)
+        const upBtn = modal.querySelector('#folder-up-btn');
+        if (upBtn) {
+            upBtn.addEventListener('click', () => {
+                const currentPath = this.currentBrowserPath || this.currentFolderPath || '';
+                const imageRoot = (this.currentFolderPath || '').replace(/\\/g, '/');
+                const current = currentPath.replace(/\\/g, '/');
+                
+                if (!current || current === imageRoot) return; // 루트에서는 위로 갈 수 없음
+                
+                const parent = current.replace(/\/$/,'').split('/').slice(0,-1).join('/');
+                
+                // 이미지 루트보다 위로는 갈 수 없음
+                if (parent.length < imageRoot.length) {
+                    this.loadFolderBrowser(imageRoot);
+                    const input = modal.querySelector('#folder-path-input');
+                    if (input) input.value = imageRoot;
+                } else {
+                    this.loadFolderBrowser(parent);
+                    const input = modal.querySelector('#folder-path-input');
+                    if (input) input.value = parent;
+                }
+            });
+        }
+
+        // Enter 키로 이동
+        modal.querySelector('#folder-path-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const pathInput = modal.querySelector('#folder-path-input');
+                const path = pathInput.value.trim();
+                if (path) {
+                    this.loadFolderBrowser(path);
+                }
+            }
+        });
+    }
+
+    // 폴더 브라우저 로드
+    async loadFolderBrowser(path = '') {
+        try {
+            // path가 없으면 현재 이미지폴더의 하위폴더들을 가져오기
+            if (!path) {
+                const response = await fetch('/api/files');
+                const data = await response.json();
+                const items = data.items || [];
+                
+                const folders = items
+                    .filter(item => item.type === 'directory')
+                    .filter(folder => 
+                        folder.name !== 'classification' && 
+                        folder.name !== 'thumbnails' &&
+                        folder.name !== 'labels'
+                    )
+                    .sort((a, b) => b.name.toLowerCase().localeCompare(a.name.toLowerCase()));
+                
+                this.displayFoldersAsIcons(folders);
+                
+                // 루트 경로 표시
+                const currentFolderText = document.getElementById('current-folder-text');
+                if (currentFolderText) {
+                    currentFolderText.textContent = '/';
+                }
+                this.currentBrowserPath = this.currentFolderPath || '';
+                return;
+            }
+            
+            const response = await fetch(`/api/browse-folders?path=${encodeURIComponent(path)}`);
+            const data = await response.json();
+            const folders = data.folders || [];
+            
+            folders.sort((a,b)=> (b.name||'').toLowerCase().localeCompare((a.name||'').toLowerCase()));
+            this.displayFoldersAsIcons(folders);
+            
+            // 현재 경로를 상대경로로 표시 (이미지 폴더를 루트로)
+            const currentFolderText = document.getElementById('current-folder-text');
+            if (currentFolderText) {
+                const imageRoot = (this.currentFolderPath || '').replace(/\\/g, '/');
+                const currentPath = path.replace(/\\/g, '/');
+                
+                if (currentPath === imageRoot) {
+                    currentFolderText.textContent = '/';
+                } else if (currentPath.startsWith(imageRoot)) {
+                    const relativePath = currentPath.substring(imageRoot.length).replace(/^\//, '');
+                    currentFolderText.textContent = relativePath ? `/${relativePath}` : '/';
+                } else {
+                    currentFolderText.textContent = '/';
+                }
+            }
+            this.currentBrowserPath = path;
+            
+        } catch (error) {
+            console.error('폴더 브라우저 로드 실패:', error);
+            const folderList = document.getElementById('folder-list');
+            if (folderList) {
+                folderList.innerHTML = '<p style="color: #ff6b6b; text-align: center; padding: 20px;">폴더 로드에 실패했습니다.</p>';
+            }
+        }
+    }
+
+    // 폴더들을 아이콘 방식으로 표시
+    displayFoldersAsIcons(folders) {
+        const folderList = document.getElementById('folder-list');
+        if (!folderList) return;
+        
+        folderList.innerHTML = '';
+        
+        if (folders.length === 0) {
+            folderList.innerHTML = '<p style="color: var(--text-secondary-color); text-align: center; padding: 20px;">폴더가 없습니다.</p>';
+            return;
+        }
+        
+        // 그리드 레이아웃으로 아이콘 표시
+        folderList.style.cssText = `
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 12px;
+            padding: 10px;
+        `;
+        
+        folders.forEach(folder => {
+            const folderItem = document.createElement('div');
+            folderItem.className = 'folder-item';
+            folderItem.style.cssText = `
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 16px 8px;
+                background: var(--panel-color);
+                border-radius: 8px;
+                cursor: pointer;
+                border: 2px solid transparent;
+                transition: all 0.2s ease;
+                text-align: center;
+                min-height: 80px;
+                justify-content: center;
+            `;
+            folderItem.innerHTML = `
+                <div style="font-size: 32px; margin-bottom: 8px;">📁</div>
+                <div style="font-size: 12px; font-weight: bold; word-break: break-word; line-height: 1.2;">${folder.name}</div>
+            `;
+            
+            const openFolder = () => {
+                // 이전 선택 제거
+                folderList.querySelectorAll('.folder-item').forEach(item => {
+                    item.style.background = 'var(--panel-color)';
+                    item.style.borderColor = 'transparent';
+                });
+                
+                // 현재 선택 표시
+                folderItem.style.background = 'var(--accent-color)';
+                folderItem.style.borderColor = 'var(--hover-color)';
+                
+                this.selectedFolderForBrowser = folder.path || (this.currentFolderPath ? `${(this.currentFolderPath.replace(/\\/g,'/')).replace(/\/$/,'')}/${folder.name}` : folder.name);
+                // 더블클릭 시 즉시 해당 폴더로 들어가서 하위 폴더 표시
+                this.loadFolderBrowser(this.selectedFolderForBrowser);
+                const input = document.getElementById('folder-path-input');
+                if (input) input.value = this.selectedFolderForBrowser;
+            };
+
+            folderItem.addEventListener('click', openFolder);
+            folderItem.addEventListener('dblclick', async () => {
+                this.selectedFolderForBrowser = folder.path || (this.currentFolderPath ? `${(this.currentFolderPath.replace(/\\/g,'/')).replace(/\/$/,'')}/${folder.name}` : folder.name);
+                await this.changeFolder(this.selectedFolderForBrowser);
+                const modal = document.getElementById('folder-browser-modal');
+                if (modal) modal.style.display = 'none';
+            });
+            
+            folderItem.addEventListener('mouseenter', () => {
+                if (folderItem.style.background !== 'var(--accent-color)') {
+                    folderItem.style.background = 'var(--hover-color)';
+                }
+            });
+            
+            folderItem.addEventListener('mouseleave', () => {
+                if (folderItem.style.background !== 'var(--accent-color)') {
+                    folderItem.style.background = 'var(--panel-color)';
+                }
+            });
+            
+            folderList.appendChild(folderItem);
+        });
+    }
+
+    // 파일명 표시 숨기기
+    hideFileName() {
+        if (this.dom.fileNameDisplay) {
+            this.dom.fileNameDisplay.style.display = 'none';
         }
         
         // 줌 바 숨기기 (이미지가 없을 때는 불필요)
@@ -886,12 +1318,13 @@ class WaferMapViewer {
         
         // 파일명 검색 기능 이벤트 리스너
         if (this.dom.searchBtn) {
-            this.dom.searchBtn.addEventListener('click', () => this.performSearch());
+            this.dom.searchBtn.addEventListener('click', () => this.showFolderBrowser());
         }
         if (this.dom.fileSearch) {
             this.dom.fileSearch.addEventListener('keydown', e => {
                 if (e.key === 'Enter') this.performSearch();
             });
+            this.dom.fileSearch.addEventListener('input', () => this.performSearch());
         }
         
 
@@ -902,15 +1335,42 @@ class WaferMapViewer {
      */
     init() {
         this._drawScheduled = false; // draw() 스케줄링 플래그
-        this.loadDirectoryContents(null, this.dom.fileExplorer);
-        this.initClassification();
-        this.refreshLabelExplorer();
         
-        // 초기 실행 시 안내 메시지 표시
-        this.showInitialState();
+        // 먼저 이미지 폴더 최상위로 이동
+        this.resetToImageFolder().then(() => {
+            this.loadDirectoryContents(null, this.dom.fileExplorer);
+            this.initClassification();
+            this.refreshLabelExplorer();
+            
+            // 현재 경로 업데이트
+            this.updateCurrentPath();
+            
+            // 초기 실행 시 안내 메시지 표시
+            this.showInitialState();
 
-        // 전역 파일 인덱스 비동기 로드 (폴더 오픈 없이 검색 가능하도록)
-        this.loadAllFilesIndex();
+            // 전역 파일 인덱스 비동기 로드 (폴더 오픈 없이 검색 가능하도록)
+            this.loadAllFilesIndex();
+        });
+    }
+
+    // 이미지 폴더 최상위로 리셋
+    async resetToImageFolder() {
+        try {
+            const response = await fetch('/api/change-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ path: 'D:/project/data/wm-811k' })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                console.log('이미지 폴더 최상위로 초기화됨');
+            }
+        } catch (error) {
+            console.error('이미지 폴더 초기화 실패:', error);
+        }
     }
 
     // =====================
@@ -2234,6 +2694,9 @@ class WaferMapViewer {
             this.dom.imageCanvas.style.display = 'block';
             this.dom.overlayCanvas.style.display = 'block';
             
+            // 파일명 표시
+            this.showFileName(path);
+            
             // 줌 바 표시 (이미지가 로드되었을 때만)
             const viewControls = document.querySelector('.view-controls');
             if (viewControls) {
@@ -2311,9 +2774,16 @@ class WaferMapViewer {
             : effectiveH / this.currentImage.height;
         // 기본은 상대 여유 적용 (초기 로드 등 일반 맞춤)
         this.transform.scale = fitScale * FIT_RELATIVE_MARGIN;
+        // 파일명 패널 높이 고려 (CSS 변수에서 가져오기)
+        const filenameBarHeight = 56; // --filename-bar-height와 동일
+        
+        // 이미지 크기를 조정 (파일명 패널과 겹치지 않도록)
+        this.transform.scale = fitScale * FIT_RELATIVE_MARGIN * 0.96; // 99%로 조정
+        
         // 실제 센터링은 전체 컨테이너 크기 기준으로 적용 (시각적 중앙 정렬)
         this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
-        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2;
+        // 파일명 패널 높이를 고려하여 적절히 위치 조정 (위로 이동)
+        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
         this.updateZoomDisplay();
         if (shouldDraw) this.scheduleDraw();
     }
@@ -2492,6 +2962,13 @@ class WaferMapViewer {
         this.dom.newClassInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') this.addClass();
         });
+        
+        // 폴더 관련 이벤트 리스너
+        this.dom.subfolderSelect.addEventListener('change', (e) => this.onSubfolderSelect(e));
+        this.dom.browseFolderBtn.addEventListener('click', () => this.showFolderBrowser());
+        
+        // 폴더 브라우저 모달 이벤트
+        this.setupFolderBrowserEvents();
     }
 
     async refreshClassList() {
@@ -4241,6 +4718,10 @@ class WaferMapViewer {
             gridColsRange.value = this.gridCols;
             document.documentElement.style.setProperty('--grid-cols', this.gridCols);
         }
+        
+        // 파일명 표시 숨기기 (그리드 모드에서는 파일명을 표시하지 않음)
+        this.hideFileName();
+        
         const viewControls = document.querySelector('.view-controls');
         if (viewControls) viewControls.style.display = 'none';
         
@@ -4472,6 +4953,9 @@ class WaferMapViewer {
         if (gridControls) gridControls.style.display = 'none';
         const viewControls = document.querySelector('.view-controls');
         if (viewControls) viewControls.style.display = 'flex';
+        
+        // 파일명 표시 숨기기 (그리드 모드에서는 파일명을 표시하지 않음)
+        this.hideFileName();
         
         // ResizeObserver 정리
         if (this.gridResizeObserver) {

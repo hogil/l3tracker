@@ -499,7 +499,18 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
                     continue
                 typ = "directory" if entry.is_dir(follow_symlinks=False) else "file"
                 items.append({"name": name, "type": typ})
-        items.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
+        # 디렉터리와 파일을 분리하여 각각 내림차순 정렬
+        directories = [x for x in items if x["type"] == "directory"]
+        files = [x for x in items if x["type"] == "file"]
+        
+        directories.sort(key=lambda x: x["name"].lower(), reverse=True)
+        files.sort(key=lambda x: x["name"].lower(), reverse=True)
+        
+        # 디버깅: 정렬 결과 로그
+        if directories:
+            logger.info(f"정렬된 디렉터리 순서: {[d['name'] for d in directories[:5]]}")
+        
+        items = directories + files
         if should_cache:
             DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
@@ -1253,6 +1264,109 @@ async def shutdown_event():
     IO_POOL.shutdown(wait=False)
 
 # ========== 메인 ==========
+# ========== 폴더 경로 관리 ==========
+@app.get("/api/current-folder")
+async def get_current_folder():
+    """현재 이미지 폴더 경로를 반환합니다."""
+    return {"current_folder": str(ROOT_DIR)}
+
+@app.post("/api/change-folder")
+async def change_folder(request: Request):
+    """이미지 폴더 경로를 변경합니다."""
+    try:
+        data = await request.json()
+        new_path = data.get("path")
+        
+        if not new_path:
+            raise HTTPException(status_code=400, detail="폴더 경로가 필요합니다")
+        
+        new_path_obj = Path(new_path).resolve()
+        
+        if not new_path_obj.exists():
+            raise HTTPException(status_code=404, detail="폴더가 존재하지 않습니다")
+        
+        if not new_path_obj.is_dir():
+            raise HTTPException(status_code=400, detail="유효한 폴더가 아닙니다")
+        
+        # 전역 ROOT_DIR 업데이트
+        global ROOT_DIR, THUMBNAIL_DIR, LABELS_DIR, LABELS_FILE
+        ROOT_DIR = new_path_obj
+        THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
+        LABELS_DIR = ROOT_DIR / "labels"
+        LABELS_FILE = LABELS_DIR / "labels.json"
+        
+        # 캐시 초기화
+        try:
+            DIRLIST_CACHE.clear()
+        except:
+            pass
+        try:
+            THUMB_STAT_CACHE.clear()
+        except:
+            pass
+        
+        # 인덱스 재구성
+        global INDEX_READY, INDEX_BUILDING
+        INDEX_READY = False
+        INDEX_BUILDING = False
+        
+        # 라벨 데이터 새로 로드
+        _labels_load()
+        
+        return {
+            "success": True, 
+            "message": f"폴더가 '{new_path}'로 변경되었습니다",
+            "new_path": str(ROOT_DIR)
+        }
+        
+    except Exception as e:
+        logger.error(f"폴더 변경 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"폴더 변경 실패: {str(e)}")
+
+@app.get("/api/browse-folders")
+async def browse_folders(path: Optional[str] = None):
+    """폴더 브라우징을 위한 폴더 목록을 반환합니다."""
+    try:
+        if not path:
+            # 드라이브 목록 반환 (Windows)
+            import string
+            drives = []
+            for letter in string.ascii_uppercase:
+                drive_path = f"{letter}:\\"
+                if Path(drive_path).exists():
+                    drives.append({
+                        "name": f"{letter}: 드라이브",
+                        "path": drive_path,
+                        "type": "drive"
+                    })
+            return {"folders": drives}
+        
+        target_path = Path(path).resolve()
+        if not target_path.exists() or not target_path.is_dir():
+            raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다")
+        
+        folders = []
+        try:
+            with os.scandir(target_path) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False) and not entry.name.startswith('.'):
+                        folders.append({
+                            "name": entry.name,
+                            "path": str(entry.path),
+                            "type": "folder"
+                        })
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="폴더 접근 권한이 없습니다")
+        
+        # 폴더명으로 내림차순 정렬
+        folders.sort(key=lambda x: x["name"].lower(), reverse=True)
+        
+        return {"folders": folders}
+        
+    except Exception as e:
+        logger.error(f"폴더 브라우징 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"폴더 브라우징 실패: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
