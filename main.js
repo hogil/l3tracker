@@ -3021,7 +3021,7 @@ class WaferMapViewer {
         this.zoomAtCenter(factor);
     }
 
-    // 리셋 버튼 전용: 현재 컨테이너 대비 맞춤 스케일에서 절대 퍼센트포인트 오프셋 적용
+    // 리셋 버튼 전용: 초기 이미지 크기와 배치와 동일하게 적용
     resetViewWithAbsoluteOffset() {
         if (!this.currentImage) return;
         const containerRect = this.dom.viewerContainer.getBoundingClientRect();
@@ -3032,10 +3032,18 @@ class WaferMapViewer {
         const fitScale = (imgRatio > containerRatio)
             ? effectiveW / this.currentImage.width
             : effectiveH / this.currentImage.height;
-        // 절대 퍼센트포인트 오프셋: 예) -0.01 → fitScale의 99%
-        this.transform.scale = fitScale * (1 + RESET_ABSOLUTE_PERCENT_OFFSET);
+        
+        // 파일명 패널 높이 고려 (CSS 변수에서 가져오기)
+        const filenameBarHeight = 56; // --filename-bar-height와 동일
+        
+        // 이미지 크기를 조정 (파일명 패널과 겹치지 않도록) - 초기 로드와 동일
+        this.transform.scale = fitScale * FIT_RELATIVE_MARGIN * 0.96;
+        
+        // 실제 센터링은 전체 컨테이너 크기 기준으로 적용 (시각적 중앙 정렬)
         this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
-        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2;
+        // 파일명 패널 높이를 고려하여 적절히 위치 조정 (위로 이동) - 초기 로드와 동일
+        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
+        
         this.updateZoomDisplay();
         this.scheduleDraw();
     }
