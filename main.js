@@ -623,6 +623,34 @@ class WaferMapViewer {
         }
     }
 
+    // 절대경로를 이미지 폴더 기준 상대경로로 변환
+    async getRelativePath(absolutePath) {
+        try {
+            const rootResponse = await fetch('/api/root-folder');
+            if (rootResponse.ok) {
+                const rootData = await rootResponse.json();
+                const imageRoot = rootData.root_folder.replace(/\\/g, '/');
+                const currentPath = absolutePath.replace(/\\/g, '/');
+                
+                // 이미지 폴더명 추출
+                const imageFolderName = imageRoot.split('/').pop() || 'root';
+                
+                if (currentPath === imageRoot) {
+                    return imageFolderName;
+                } else if (currentPath.startsWith(imageRoot)) {
+                    const relativePath = currentPath.substring(imageRoot.length).replace(/^\//, '');
+                    return relativePath ? `${imageFolderName}/${relativePath}` : imageFolderName;
+                } else {
+                    return imageFolderName;
+                }
+            }
+        } catch (error) {
+            console.error('상대경로 변환 실패:', error);
+        }
+        // 폴백: 경로의 마지막 부분만 반환
+        return absolutePath.replace(/\\/g, '/').split('/').pop() || absolutePath;
+    }
+
     // 폴더 브라우저 표시
     async showFolderBrowser() {
         const modal = document.getElementById('folder-browser-modal');
@@ -636,13 +664,19 @@ class WaferMapViewer {
                 const rootData = await rootResponse.json();
                 const imageRoot = rootData.root_folder;
                 const input = modal.querySelector('#folder-path-input');
-                if (input) input.value = imageRoot;
+                if (input) {
+                    const relativePath = await this.getRelativePath(imageRoot);
+                    input.value = relativePath;
+                }
                 this.currentBrowserPath = imageRoot;
                 this.loadFolderBrowser(imageRoot);
             } else {
                 // 폴백: 현재 폴더 사용
                 const input = modal.querySelector('#folder-path-input');
-                if (input) input.value = this.currentFolderPath || '';
+                if (input) {
+                    const relativePath = await this.getRelativePath(this.currentFolderPath || '');
+                    input.value = relativePath;
+                }
                 this.currentBrowserPath = this.currentFolderPath || '';
                 this.loadFolderBrowser(this.currentFolderPath);
             }
@@ -650,7 +684,10 @@ class WaferMapViewer {
             console.error('폴더 브라우저 초기화 실패:', error);
             // 폴백: 현재 폴더 사용
             const input = modal.querySelector('#folder-path-input');
-            if (input) input.value = this.currentFolderPath || '';
+            if (input) {
+                const relativePath = await this.getRelativePath(this.currentFolderPath || '');
+                input.value = relativePath;
+            }
             this.currentBrowserPath = this.currentFolderPath || '';
             this.loadFolderBrowser(this.currentFolderPath);
         }
@@ -699,7 +736,10 @@ class WaferMapViewer {
                         const imageRoot = rootData.root_folder;
                         this.loadFolderBrowser(imageRoot);
                         const input = modal.querySelector('#folder-path-input');
-                        if (input) input.value = imageRoot;
+                        if (input) {
+                            const relativePath = await this.getRelativePath(imageRoot);
+                            input.value = relativePath;
+                        }
                     }
                 } catch (error) {
                     console.error('루트 이동 실패:', error);
@@ -724,7 +764,10 @@ class WaferMapViewer {
                     const currentPath = this.currentBrowserPath || '';
                     const current = currentPath.replace(/\\/g, '/');
                     
-                    if (!current || current === imageRoot) return; // 루트에서는 위로 갈 수 없음
+                    if (!current || current === imageRoot) {
+                        // 루트에서는 위로 갈 수 없음 - 아무 변화 없음
+                        return;
+                    }
                     
                     const parent = current.replace(/\/$/,'').split('/').slice(0,-1).join('/');
                     
@@ -732,11 +775,17 @@ class WaferMapViewer {
                     if (parent.length < imageRoot.length || !parent.startsWith(imageRoot)) {
                         this.loadFolderBrowser(imageRoot);
                         const input = modal.querySelector('#folder-path-input');
-                        if (input) input.value = imageRoot;
+                        if (input) {
+                            const relativePath = await this.getRelativePath(imageRoot);
+                            input.value = relativePath;
+                        }
                     } else {
                         this.loadFolderBrowser(parent);
                         const input = modal.querySelector('#folder-path-input');
-                        if (input) input.value = parent;
+                        if (input) {
+                            const relativePath = await this.getRelativePath(parent);
+                            input.value = relativePath;
+                        }
                     }
                 } catch (error) {
                     console.error('위로 이동 실패:', error);
@@ -917,7 +966,11 @@ class WaferMapViewer {
                 // 더블클릭 시 즉시 해당 폴더로 들어가서 하위 폴더 표시
                 this.loadFolderBrowser(this.selectedFolderForBrowser);
                 const input = document.getElementById('folder-path-input');
-                if (input) input.value = this.selectedFolderForBrowser;
+                if (input) {
+                    this.getRelativePath(this.selectedFolderForBrowser).then(relativePath => {
+                        input.value = relativePath;
+                    });
+                }
             };
 
             folderItem.addEventListener('click', openFolder);
