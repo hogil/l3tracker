@@ -484,9 +484,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     
     key = str(target)
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -512,7 +512,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
         
         items = directories + files
         if should_cache:
-            DIRLIST_CACHE.set(key, items)
+        DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -581,20 +581,20 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     if thumb.exists() and thumb.stat().st_size > 0:
         thumb_mtime = thumb.stat().st_mtime
         if thumb_mtime >= image_mtime:
-            cached = THUMB_STAT_CACHE.get(key)
-            if cached:
-                return thumb
-            THUMB_STAT_CACHE.set(key, True)
-            return thumb
-    
+    cached = THUMB_STAT_CACHE.get(key)
+    if cached:
+        return thumb
+        THUMB_STAT_CACHE.set(key, True)
+        return thumb
+
     # 썸네일이 없거나 구버전이면 새로 생성
     async with THUMBNAIL_SEM:
         # 다시 한번 확인 (동시성 고려)
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
             if thumb_mtime >= image_mtime:
-                THUMB_STAT_CACHE.set(key, True)
-                return thumb
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
         if thumb.exists():
@@ -788,7 +788,10 @@ async def get_classes():
         classification_dir = _classification_dir()
         _dircache_invalidate(classification_dir)
         
+        # classification 폴더가 없으면 생성
         if not classification_dir.exists():
+            classification_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"classification 폴더 생성: {classification_dir}")
             return {"success": True, "classes": []}
 
         classes = []
@@ -1321,7 +1324,7 @@ async def change_folder(request: Request):
         global ROOT_DIR, THUMBNAIL_DIR, LABELS_DIR, LABELS_FILE
         ROOT_DIR = new_path_obj
         THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
-        LABELS_DIR = ROOT_DIR / "labels"
+        LABELS_DIR = ROOT_DIR / "classification"
         LABELS_FILE = LABELS_DIR / "labels.json"
         
         # 캐시 초기화
@@ -1338,6 +1341,15 @@ async def change_folder(request: Request):
         global INDEX_READY, INDEX_BUILDING
         INDEX_READY = False
         INDEX_BUILDING = False
+        
+        # classification 폴더 자동 생성
+        classification_dir = _classification_dir()
+        if not classification_dir.exists():
+            classification_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"새 폴더의 classification 폴더 생성: {classification_dir}")
+        
+        # LABELS_DIR 폴더도 자동 생성
+        LABELS_DIR.mkdir(parents=True, exist_ok=True)
         
         # 라벨 데이터 새로 로드
         _labels_load()

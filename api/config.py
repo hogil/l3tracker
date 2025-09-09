@@ -25,7 +25,7 @@ THUMB_STAT_TTL_SECONDS = float(os.getenv("THUMB_STAT_TTL_SECONDS", "5"))
 THUMB_STAT_CACHE_CAPACITY = int(os.getenv("THUMB_STAT_CACHE_CAPACITY", "8192"))
 
 # ===== 라벨 저장 =====
-LABELS_DIR = ROOT_DIR / "labels"
+LABELS_DIR = ROOT_DIR / "classification"
 LABELS_FILE = LABELS_DIR / "labels.json"
 
 # ===== 서버 기본값 =====
