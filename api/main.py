@@ -570,16 +570,39 @@ def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple
 async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     thumb = get_thumbnail_path(image_path, size)
     key = f"{thumb}|{size[0]}x{size[1]}"
-    cached = THUMB_STAT_CACHE.get(key)
-    if cached:
-        return thumb
+    
+    # 원본 파일의 수정 시간 확인
+    if not image_path.exists():
+        raise FileNotFoundError(f"원본 이미지 파일이 존재하지 않습니다: {image_path}")
+    
+    image_mtime = image_path.stat().st_mtime
+    
+    # 썸네일이 존재하고 원본보다 최신인 경우에만 기존 썸네일 사용
     if thumb.exists() and thumb.stat().st_size > 0:
-        THUMB_STAT_CACHE.set(key, True)
-        return thumb
-    async with THUMBNAIL_SEM:
-        if thumb.exists() and thumb.stat().st_size > 0:
+        thumb_mtime = thumb.stat().st_mtime
+        if thumb_mtime >= image_mtime:
+            cached = THUMB_STAT_CACHE.get(key)
+            if cached:
+                return thumb
             THUMB_STAT_CACHE.set(key, True)
             return thumb
+    
+    # 썸네일이 없거나 구버전이면 새로 생성
+    async with THUMBNAIL_SEM:
+        # 다시 한번 확인 (동시성 고려)
+        if thumb.exists() and thumb.stat().st_size > 0:
+            thumb_mtime = thumb.stat().st_mtime
+            if thumb_mtime >= image_mtime:
+                THUMB_STAT_CACHE.set(key, True)
+                return thumb
+        
+        # 기존 썸네일 파일 삭제 (구버전인 경우)
+        if thumb.exists():
+            try:
+                thumb.unlink()
+            except Exception as e:
+                logger.warning(f"기존 썸네일 삭제 실패: {thumb}, 오류: {e}")
+        
         await asyncio.get_running_loop().run_in_executor(
             IO_POOL, _generate_thumbnail_sync, image_path, thumb, size
         )

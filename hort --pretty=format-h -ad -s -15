@@ -1,0 +1,10 @@
+[33mb7317be[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m fix: IndentationError 완전 수정 - 서버 정상 시작 확인
+[33m986fe33[m fix: 썸네일 캐시 문제 및 labels 폴더 자동 생성 문제 해결
+[33m61748c4[m fix: 이미지 뷰어 레이아웃 및 Reset 버튼 동작 개선
+[33m2d1dfeb[m fix: 폴더 브라우저 경로 표시 완전 개선 및 제품 선택 글자크기 조정
+[33me73a4fd[m fix: 폴더 브라우저 경로 표시 완전 개선
+[33m0a4f6a2[m fix: 폴더 선택창 경로 표시를 이미지 폴더명부터 시작하도록 개선
+[33mbc81d8a[m fix: 폴더 브라우저 경로 표시 및 네비게이션 개선
+[33m0f0c714[m fix: 하드코딩된 이미지 폴더 경로를 config.py ROOT_DIR 설정 사용하도록 수정
+[33m2ea1194[m feat: 폴더 브라우저 시스템 및 UI/UX 개선 (v2.5.0)
+[33m927b8b8[m logging: add colorful HTTP methods and status codes (GET=cyan, POST=yellow, 200=green, 404=yellow, 500=red)

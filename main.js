@@ -81,7 +81,7 @@ class ThumbnailManager {
         this.concurrentLoads++;
         
         try {
-            const response = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512`);
+            const response = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`);
             if (response.ok) {
                 const blob = await response.blob();
                 return URL.createObjectURL(blob);
@@ -4961,7 +4961,7 @@ class WaferMapViewer {
             };
             
             // 고화질 썸네일로 시작 (빠른 로딩)
-            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512`;
+            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`;
             thumbBox.appendChild(img);
             wrap.appendChild(thumbBox);
             // Checkmark
