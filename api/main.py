@@ -416,7 +416,7 @@ def _labels_load():
 def _labels_save():
     global LABELS_MTIME
     try:
-        LABELS_DIR.mkdir(parents=True, exist_ok=True)
+        # LABELS_DIR은 classification 폴더와 동일하며, 이미 다른 곳에서 생성됨
         tmp = LABELS_FILE.with_suffix(".json.tmp")
         with LABELS_LOCK:
             with open(tmp, "w", encoding="utf-8") as f:
@@ -512,7 +512,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
         
         items = directories + files
         if should_cache:
-        DIRLIST_CACHE.set(key, items)
+            DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -1279,7 +1279,6 @@ async def startup_event():
     logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
     logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
     _classification_dir().mkdir(parents=True, exist_ok=True)
-    LABELS_DIR.mkdir(parents=True, exist_ok=True)
     _labels_load()
     global CLASSES_MTIME; CLASSES_MTIME = _classes_stat_mtime()
     asyncio.create_task(build_file_index_background())
@@ -1347,9 +1346,6 @@ async def change_folder(request: Request):
         if not classification_dir.exists():
             classification_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"새 폴더의 classification 폴더 생성: {classification_dir}")
-        
-        # LABELS_DIR 폴더도 자동 생성
-        LABELS_DIR.mkdir(parents=True, exist_ok=True)
         
         # 라벨 데이터 새로 로드
         _labels_load()
