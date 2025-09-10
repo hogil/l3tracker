@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>웨이퍼맵 뷰어 접속 분석</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -42,16 +43,12 @@
             background-clip: text;
         }
         
-        .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-        
         .controls {
             display: flex;
             gap: 10px;
             margin-bottom: 25px;
             justify-content: center;
+            flex-wrap: wrap;
         }
         
         .btn {
@@ -69,17 +66,26 @@
         .btn:hover {
             background: #45a049;
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
         }
         
         .btn.secondary {
             background: #2196F3;
-            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
         }
         
         .btn.secondary:hover {
             background: #1976D2;
-            box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
+        }
+        
+        .btn.chart-toggle {
+            background: #FF9800;
+        }
+        
+        .btn.chart-toggle:hover {
+            background: #F57C00;
+        }
+        
+        .btn.chart-toggle.active {
+            background: #4CAF50;
         }
         
         .stats-section {
@@ -130,20 +136,27 @@
             font-weight: 500;
         }
         
-        .trend-chart {
+        .chart-container {
             background: #1a1a2e;
             border-radius: 12px;
             padding: 25px;
             margin-bottom: 30px;
             border: 1px solid #333;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
         
-        .chart-container {
-            height: 300px;
+        .chart-wrapper {
             position: relative;
+            height: 400px;
             background: #0f0f23;
             border-radius: 8px;
             padding: 20px;
+        }
+        
+        .chart-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
         }
         
         .user-table {
@@ -195,42 +208,6 @@
             font-family: 'Courier New', monospace;
             font-size: 0.85rem;
             color: #2196F3;
-        }
-        
-        .daily-trend {
-            background: #1a1a2e;
-            border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 30px;
-            border: 1px solid #333;
-        }
-        
-        .trend-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 15px;
-            margin-bottom: 8px;
-            background: #2a2a3e;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .trend-item:hover {
-            background: #3a3a4e;
-            transform: translateX(5px);
-        }
-        
-        .trend-date {
-            font-weight: bold;
-            color: #4CAF50;
-        }
-        
-        .trend-stats {
-            display: flex;
-            gap: 15px;
-            font-size: 0.9rem;
         }
         
         .modal {
@@ -345,37 +322,43 @@
     <div class="container">
         <div class="header">
             <h1>📊 웨이퍼맵 뷰어 접속 분석</h1>
-            <p>실시간 사용자 접속 현황 및 상세 통계 분석</p>
+            <p>실시간 사용자 접속 현황 및 시각적 트렌드 분석</p>
         </div>
         
         <div class="controls">
             <button class="btn" onclick="loadStats()">🔄 새로고침</button>
-            <button class="btn secondary" onclick="toggleTrendDays()">📈 트렌드 기간 변경</button>
+            <button class="btn chart-toggle active" id="dailyChartBtn" onclick="showDailyChart()">📈 일별 차트</button>
+            <button class="btn chart-toggle" id="monthlyChartBtn" onclick="showMonthlyChart()">📅 월별 차트</button>
             <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
         </div>
         
-        <div class="stats-section">
-            <h2 class="section-title">📋 오늘 요약</h2>
-            <div class="stats-grid" id="dailyStats">
-                <div class="loading">통계 로딩 중...</div>
-            </div>
-        </div>
-        
-        <div class="stats-section">
-            <h2 class="section-title">📈 일별 접속 트렌드 (최근 7일)</h2>
-            <div class="daily-trend" id="trendData">
-                <div class="loading">트렌드 데이터 로딩 중...</div>
-            </div>
-        </div>
-        
-        <div class="stats-section">
-            <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
-            <div class="user-table">
-                <div class="table-header">
-                    총 사용자: <span id="totalUsers">-</span>명
+        <!-- 상단 섹션: 오늘 요약 + 사용자 목록 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+            <div class="stats-section">
+                <h2 class="section-title">📋 오늘 요약</h2>
+                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="loading">통계 로딩 중...</div>
                 </div>
-                <div class="table-content" id="userTable">
-                    <div class="loading">사용자 데이터 로딩 중...</div>
+            </div>
+            
+            <div class="stats-section">
+                <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
+                <div class="user-table">
+                    <div class="table-header">
+                        총 사용자: <span id="totalUsers">-</span>명
+                    </div>
+                    <div class="table-content" id="userTable" style="max-height: 350px;">
+                        <div class="loading">사용자 데이터 로딩 중...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="stats-section">
+            <h2 class="section-title" id="chartTitle">📈 일별 접속 트렌드 (시각적 차트)</h2>
+            <div class="chart-container">
+                <div class="chart-wrapper">
+                    <canvas id="trendChart"></canvas>
                 </div>
             </div>
         </div>
@@ -395,24 +378,35 @@
     </div>
 
     <script>
-        let currentTrendDays = 7;
+        let currentChart = null;
+        let currentView = 'daily';
+        let trendData = null;
+        let monthlyData = null;
         
         async function loadStats() {
             try {
                 // 병렬로 모든 데이터 로드
-                const [dailyResponse, trendResponse, usersResponse] = await Promise.all([
+                const [dailyResponse, trendResponse, monthlyResponse, usersResponse] = await Promise.all([
                     fetch('/api/stats/daily'),
-                    fetch(`/api/stats/trend?days=${currentTrendDays}`),
+                    fetch('/api/stats/trend?days=14'),
+                    fetch('/api/stats/monthly?months=6'),
                     fetch('/api/stats/users')
                 ]);
                 
                 const dailyData = await dailyResponse.json();
-                const trendData = await trendResponse.json();
+                trendData = await trendResponse.json();
+                monthlyData = await monthlyResponse.json();
                 const usersData = await usersResponse.json();
                 
                 renderDailyStats(dailyData);
-                renderTrendData(trendData);
                 renderUserTable(usersData.users);
+                
+                // 현재 보기에 따라 차트 렌더링
+                if (currentView === 'daily') {
+                    showDailyChart();
+                } else {
+                    showMonthlyChart();
+                }
                 
                 document.getElementById('totalUsers').textContent = usersData.total_users;
                 
@@ -444,35 +438,176 @@
             `;
         }
         
-        function renderTrendData(data) {
-            const container = document.getElementById('trendData');
+        function showDailyChart() {
+            currentView = 'daily';
+            document.getElementById('chartTitle').textContent = '📈 일별 접속 트렌드 (최근 14일)';
+            document.getElementById('dailyChartBtn').classList.add('active');
+            document.getElementById('monthlyChartBtn').classList.remove('active');
             
-            // 날짜순으로 정렬 (최신순)
-            const sortedDates = Object.keys(data).sort().reverse();
+            if (!trendData) return;
             
-            let html = '';
-            sortedDates.forEach(date => {
-                const dayData = data[date];
-                const isToday = date === new Date().toISOString().split('T')[0];
-                
-                html += `
-                    <div class="trend-item" onclick="showDayDetail('${date}')" data-date="${date}">
-                        <div>
-                            <span class="trend-date">${formatDate(date)} ${isToday ? '(오늘)' : ''}</span>
-                        </div>
-                        <div class="trend-stats">
-                            <span>👥 ${dayData.active_users}명</span>
-                            <span>🆕 ${dayData.new_users}명</span>
-                            <span>📊 ${dayData.total_requests}회</span>
-                        </div>
-                    </div>
-                `;
+            // 차트 데이터 준비
+            const sortedDates = Object.keys(trendData).sort();
+            const labels = sortedDates.map(date => formatChartDate(date));
+            const activeUsers = sortedDates.map(date => trendData[date].active_users);
+            const newUsers = sortedDates.map(date => trendData[date].new_users);
+            const totalRequests = sortedDates.map(date => trendData[date].total_requests);
+            
+            renderChart({
+                labels: labels,
+                datasets: [
+                    {
+                        label: '활성 사용자',
+                        data: activeUsers,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4
+                    },
+                    {
+                        label: '신규 사용자',
+                        data: newUsers,
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        tension: 0.4
+                    },
+                    {
+                        label: '총 요청 수',
+                        data: totalRequests,
+                        borderColor: '#FF9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        yAxisID: 'y1',
+                        tension: 0.4
+                    }
+                ]
+            }, 'daily');
+        }
+        
+        function showMonthlyChart() {
+            currentView = 'monthly';
+            document.getElementById('chartTitle').textContent = '📅 월별 접속 트렌드 (최근 6개월)';
+            document.getElementById('monthlyChartBtn').classList.add('active');
+            document.getElementById('dailyChartBtn').classList.remove('active');
+            
+            if (!monthlyData) return;
+            
+            // 차트 데이터 준비
+            const sortedMonths = Object.keys(monthlyData).sort();
+            const labels = sortedMonths.map(month => monthlyData[month].month_name);
+            const activeUsers = sortedMonths.map(month => monthlyData[month].active_users);
+            const newUsers = sortedMonths.map(month => monthlyData[month].new_users);
+            const totalRequests = sortedMonths.map(month => monthlyData[month].total_requests);
+            
+            renderChart({
+                labels: labels,
+                datasets: [
+                    {
+                        label: '활성 사용자',
+                        data: activeUsers,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                        fill: true,
+                        tension: 0.4
+                    },
+                    {
+                        label: '신규 사용자',
+                        data: newUsers,
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                        fill: true,
+                        tension: 0.4
+                    },
+                    {
+                        label: '총 요청 수',
+                        data: totalRequests,
+                        borderColor: '#FF9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.2)',
+                        yAxisID: 'y1',
+                        fill: true,
+                        tension: 0.4
+                    }
+                ]
+            }, 'monthly');
+        }
+        
+        function renderChart(data, type) {
+            const ctx = document.getElementById('trendChart');
+            
+            // 기존 차트 삭제
+            if (currentChart) {
+                currentChart.destroy();
+            }
+            
+            currentChart = new Chart(ctx, {
+                type: 'line',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#ffffff'
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(26, 26, 46, 0.9)',
+                            titleColor: '#4CAF50',
+                            bodyColor: '#ffffff',
+                            borderColor: '#4CAF50',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: '#aaaaaa'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            ticks: {
+                                color: '#aaaaaa'
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            title: {
+                                display: true,
+                                text: '사용자 수',
+                                color: '#4CAF50'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            ticks: {
+                                color: '#aaaaaa'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            title: {
+                                display: true,
+                                text: '요청 수',
+                                color: '#FF9800'
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
             });
-            
-            container.innerHTML = html;
-            
-            // 전역 변수에 저장 (상세 보기용)
-            window.trendData = data;
         }
         
         function renderUserTable(users) {
@@ -484,30 +619,29 @@
             }
             
             let html = `
-                <div class="user-row" style="background: #333; font-weight: bold;">
-                    <div>사용자 ID</div>
-                    <div>IP 주소</div>
-                    <div>최근 접속</div>
+                <div class="user-row" style="background: #333; font-weight: bold; grid-template-columns: 1fr 100px 80px 80px;">
+                    <div>사용자 (ID / IP)</div>
                     <div>총 요청</div>
-                    <div>접속 일수</div>
-                    <div>첫 접속</div>
-                    <div>주요 기능</div>
+                    <div>접속일</div>
+                    <div>최근접속</div>
                 </div>
             `;
             
             users.forEach(user => {
-                const mostUsedEndpoint = user.most_used_endpoint ? 
-                    `${user.most_used_endpoint[0].replace('/api/', '')} (${user.most_used_endpoint[1]})` : 'N/A';
+                const displayName = user.display_name || user.user_id;
+                const userDisplay = user.display_name ? 
+                    `${user.display_name}<br><small style="color: #666;">${user.user_id}</small>` : 
+                    user.user_id;
                 
                 html += `
-                    <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')">
-                        <div class="user-id">${user.user_id}</div>
-                        <div class="ip-address">${user.primary_ip}</div>
-                        <div>${formatDate(user.last_seen)}</div>
-                        <div>${user.total_requests}</div>
-                        <div>${user.unique_days}일</div>
-                        <div>${formatDate(user.first_seen)}</div>
-                        <div style="font-size: 0.8rem; color: #aaa;">${mostUsedEndpoint}</div>
+                    <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')" style="grid-template-columns: 1fr 100px 80px 80px;">
+                        <div>
+                            <div class="user-id" style="margin-bottom: 2px;">${userDisplay}</div>
+                            <div class="ip-address" style="font-size: 0.8rem;">${user.primary_ip}</div>
+                        </div>
+                        <div style="text-align: center; font-weight: bold;">${user.total_requests}</div>
+                        <div style="text-align: center;">${user.unique_days}일</div>
+                        <div style="text-align: center; font-size: 0.9rem;">${formatDate(user.last_seen)}</div>
                     </div>
                 `;
             });
@@ -582,64 +716,15 @@
             }
         }
         
-        function showDayDetail(date) {
-            if (!window.trendData || !window.trendData[date]) return;
-            
-            const dayData = window.trendData[date];
-            
-            document.getElementById('modalTitle').textContent = `${formatDate(date)} 접속 상세`;
-            
-            const modalBody = document.getElementById('modalBody');
-            modalBody.innerHTML = `
-                <div class="detail-grid">
-                    <div class="detail-card">
-                        <div class="detail-title">활성 사용자</div>
-                        <div class="detail-value">${dayData.active_users}명</div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="detail-title">신규 사용자</div>
-                        <div class="detail-value">${dayData.new_users}명</div>
-                    </div>
-                    <div class="detail-card">
-                        <div class="detail-title">총 요청 수</div>
-                        <div class="detail-value">${dayData.total_requests}회</div>
-                    </div>
-                </div>
-                
-                <h3 style="margin: 20px 0 10px 0; color: #4CAF50;">👥 접속 사용자 목록</h3>
-                <div class="activity-list">
-                    ${dayData.user_list
-                        .sort((a, b) => b.requests - a.requests)
-                        .map(user => `
-                            <div class="activity-item" onclick="showUserDetail('${user.user_id}')" style="cursor: pointer;">
-                                <span style="color: #4CAF50;">${user.user_id}</span>
-                                <span style="color: #2196F3; margin-left: 10px;">${user.ip}</span>
-                                <span style="margin-left: 10px;">${user.requests}회 요청</span>
-                            </div>
-                        `).join('')}
-                </div>
-            `;
-            
-            document.getElementById('userModal').style.display = 'block';
-        }
-        
         function closeModal() {
             document.getElementById('userModal').style.display = 'none';
         }
         
-        function toggleTrendDays() {
-            const days = prompt('트렌드 기간을 입력하세요 (1-30일):', currentTrendDays);
-            if (days && !isNaN(days) && days >= 1 && days <= 30) {
-                currentTrendDays = parseInt(days);
-                loadStats();
-            }
-        }
-        
         function exportStats() {
-            // 현재 통계를 JSON으로 다운로드
             const data = {
                 daily: window.dailyData,
-                trend: window.trendData,
+                trend: trendData,
+                monthly: monthlyData,
                 users: window.usersData,
                 exported_at: new Date().toISOString()
             };
@@ -648,7 +733,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `l3tracker_stats_${new Date().toISOString().split('T')[0]}.json`;
+            a.download = `wafer_viewer_stats_${new Date().toISOString().split('T')[0]}.json`;
             a.click();
             URL.revokeObjectURL(url);
         }
@@ -672,9 +757,16 @@
             }
         }
         
+        function formatChartDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('ko-KR', { 
+                month: 'short', 
+                day: 'numeric'
+            });
+        }
+        
         function showError(message) {
             document.getElementById('dailyStats').innerHTML = `<div class="error">${message}</div>`;
-            document.getElementById('trendData').innerHTML = `<div class="error">${message}</div>`;
             document.getElementById('userTable').innerHTML = `<div class="error">${message}</div>`;
         }
         
@@ -689,8 +781,8 @@
         // 페이지 로드 시 통계 로드
         loadStats();
         
-        // 30초마다 자동 새로고침
-        setInterval(loadStats, 30000);
+        // 1분마다 자동 새로고침
+        setInterval(loadStats, 60000);
     </script>
 </body>
 </html>

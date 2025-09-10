@@ -42,6 +42,12 @@ class AccessLogger:
         combined = f"{ip}:{user_agent}"
         return hashlib.md5(combined.encode()).hexdigest()[:12]
     
+    def set_user_display_name(self, user_id: str, display_name: str):
+        """사용자 표시 이름 설정"""
+        if user_id in self.user_stats:
+            self.user_stats[user_id]["display_name"] = display_name
+            self.save_stats()
+    
     def load_stats(self) -> Dict[str, Dict[str, Any]]:
         """사용자 통계 로드"""
         try:
@@ -66,8 +72,16 @@ class AccessLogger:
         user_agent = request.headers.get("user-agent", "Unknown")
         method = request.method
         
+        # 표시 이름 가져오기
+        display_name = ""
+        if user_id in self.user_stats:
+            display_name = self.user_stats[user_id].get("display_name", "")
+        
         # 콘솔 및 파일 로그
-        log_message = f"🔗 {client_ip} | ID:{user_id} | {method} {endpoint}"
+        if display_name:
+            log_message = f"🔗 {client_ip} | {display_name} (ID:{user_id}) | {method} {endpoint}"
+        else:
+            log_message = f"🔗 {client_ip} | ID:{user_id} | {method} {endpoint}"
         access_logger.info(log_message)
         
         # 통계 업데이트
@@ -102,7 +116,8 @@ class AccessLogger:
                 "daily_requests": {},
                 "total_requests": 0,
                 "unique_days": set(),
-                "endpoints": {}
+                "endpoints": {},
+                "display_name": ""  # 사용자 표시 이름
             }
         
         user_data = self.user_stats[user_id]
@@ -219,6 +234,64 @@ class AccessLogger:
                     day_stats["new_users"] += 1
             
             trend_data[target_date] = day_stats
+        
+        return trend_data
+    
+    def get_monthly_trend(self, months: int = 3) -> Dict[str, Any]:
+        """월별 트렌드 (최근 N개월)"""
+        from datetime import datetime, timedelta
+        import calendar
+        
+        trend_data = {}
+        base_date = datetime.now().date()
+        
+        for i in range(months):
+            # 해당 월의 첫째 날
+            if i == 0:
+                target_date = base_date.replace(day=1)
+            else:
+                # 이전 월로 이동
+                if target_date.month == 1:
+                    target_date = target_date.replace(year=target_date.year - 1, month=12, day=1)
+                else:
+                    target_date = target_date.replace(month=target_date.month - 1, day=1)
+            
+            month_key = target_date.strftime('%Y-%m')
+            
+            month_stats = {
+                "month": month_key,
+                "month_name": target_date.strftime('%Y년 %m월'),
+                "active_users": set(),
+                "new_users": 0,
+                "total_requests": 0,
+                "daily_breakdown": {}
+            }
+            
+            # 해당 월의 모든 날짜 확인
+            for user_id, user_data in self.user_stats.items():
+                for date_str, requests in user_data["daily_requests"].items():
+                    if date_str.startswith(month_key):
+                        month_stats["active_users"].add(user_id)
+                        month_stats["total_requests"] += requests
+                        
+                        if date_str not in month_stats["daily_breakdown"]:
+                            month_stats["daily_breakdown"][date_str] = {"users": set(), "requests": 0}
+                        
+                        month_stats["daily_breakdown"][date_str]["users"].add(user_id)
+                        month_stats["daily_breakdown"][date_str]["requests"] += requests
+                
+                # 신규 사용자 확인
+                if user_data["first_seen"].startswith(month_key):
+                    month_stats["new_users"] += 1
+            
+            # Set을 숫자로 변환
+            month_stats["active_users"] = len(month_stats["active_users"])
+            
+            # daily_breakdown의 set을 숫자로 변환
+            for day_key in month_stats["daily_breakdown"]:
+                month_stats["daily_breakdown"][day_key]["users"] = len(month_stats["daily_breakdown"][day_key]["users"])
+            
+            trend_data[month_key] = month_stats
         
         return trend_data
 

@@ -333,6 +333,49 @@ class WaferMapViewer {
         
         // 사용자 이름 상태
         this.userName = localStorage.getItem('l3tracker_username') || '';
+    }
+    
+    setupUserName() {
+        const userNameInput = document.getElementById('user-name-input');
+        if (userNameInput) {
+            // 저장된 사용자 이름 로드
+            userNameInput.value = this.userName;
+            
+            // 사용자 이름 변경 이벤트
+            userNameInput.addEventListener('blur', () => {
+                this.userName = userNameInput.value.trim();
+                if (this.userName) {
+                    localStorage.setItem('l3tracker_username', this.userName);
+                    this.sendUserNameToServer();
+                }
+            });
+            
+            userNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    userNameInput.blur();
+                }
+            });
+            
+            // 초기 서버 전송 (기존 사용자인 경우)
+            if (this.userName) {
+                this.sendUserNameToServer();
+            }
+        }
+    }
+    
+    async sendUserNameToServer() {
+        if (this.userName) {
+            try {
+                await fetch('/api/set-username', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: this.userName })
+                });
+                console.log(`사용자 이름 설정: ${this.userName}`);
+            } catch (error) {
+                console.error('사용자 이름 전송 실패:', error);
+            }
+        }
 
         // Bind 'this' for event handlers that are dynamically added/removed
         this.boundHandleMouseMove = this.handleMouseMove.bind(this);

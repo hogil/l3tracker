@@ -510,8 +510,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:
-    cached = DIRLIST_CACHE.get(key)
+    if should_cache:    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -618,8 +617,7 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
         # 다시 한번 확인 (동시성 고려)
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
-            if thumb_mtime >= image_mtime:
-            THUMB_STAT_CACHE.set(key, True)
+            if thumb_mtime >= image_mtime:            THUMB_STAT_CACHE.set(key, True)
             return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
@@ -1284,6 +1282,11 @@ async def get_trend_stats(days: int = Query(7, ge=1, le=30)):
     """일별 트렌드 통계"""
     return logger_instance.get_daily_trend(days)
 
+@app.get("/api/stats/monthly")
+async def get_monthly_stats(months: int = Query(3, ge=1, le=12)):
+    """월별 트렌드 통계"""
+    return logger_instance.get_monthly_trend(months)
+
 @app.get("/api/stats/users")
 async def get_user_stats():
     """전체 사용자 통계"""
@@ -1292,9 +1295,10 @@ async def get_user_stats():
         user_summary = logger_instance.get_user_summary(user_id)
         user_data = logger_instance.user_stats[user_id]
         
-        # IP 주소도 포함
+        # IP 주소와 표시 이름 포함
         user_summary["ip_addresses"] = list(user_data["ip_addresses"]) if isinstance(user_data["ip_addresses"], (set, list)) else []
         user_summary["primary_ip"] = user_summary["ip_addresses"][0] if user_summary["ip_addresses"] else "unknown"
+        user_summary["display_name"] = user_data.get("display_name", "")
         
         stats.append(user_summary)
     
@@ -1319,6 +1323,26 @@ async def get_user_detail(user_id: str):
         user_data["unique_days"] = list(user_data["unique_days"])
     
     return user_data
+
+class SetUsernameRequest(BaseModel):
+    username: str
+
+@app.post("/api/set-username")
+async def set_username(request: SetUsernameRequest, http_request: Request):
+    """사용자 이름 설정"""
+    try:
+        # 현재 사용자 ID 생성
+        client_ip = logger_instance.get_client_ip(http_request)
+        user_agent = http_request.headers.get("user-agent", "Unknown")
+        user_id = logger_instance.generate_user_id(client_ip, user_agent)
+        
+        # 사용자 이름 설정
+        logger_instance.set_user_display_name(user_id, request.username)
+        
+        return {"success": True, "user_id": user_id, "username": request.username}
+    except Exception as e:
+        logger.error(f"사용자 이름 설정 실패: {e}")
+        raise HTTPException(status_code=500, detail="사용자 이름 설정에 실패했습니다")
 
 # ========== 기타 ==========
 app.mount("/js", StaticFiles(directory="js"), name="js")
