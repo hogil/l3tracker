@@ -46,13 +46,12 @@ class AccessLogger:
         }
         method_color = method_colors.get(method, '\033[97m')  # 기본: 밝은 흰색
         
-        # 고정 너비로 완벽 정렬 (밀리초 제외)
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        formatted_ip = f"{client_ip:<15}"  # IP 15자리 고정
-        formatted_method = f"{method:<6}"  # 메서드 6자리 고정 (DELETE가 최대)
+        # INFO 로그와 정확히 동일한 형식으로 맞춤
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]  # 밀리초 포함 (INFO와 동일)
         
-        # 완벽한 컬럼 정렬: 로그타입(7) + 타임스탬프(19) + IP(15) + 메서드(6) + 엔드포인트
-        log_message = f"\033[93mACCESS\033[0m: {timestamp} \033[90m{formatted_ip}\033[0m - \"{method_color}{formatted_method}\033[0m{endpoint} HTTP/1.1\" \033[93m200\033[0m"
+        # INFO 로그: "INFO: 2025-09-10 23:19:53,273     218.145.184.43:54005 - "GET ..."
+        # ACCESS를 INFO와 똑같이 맞춤: 공백 5개 추가
+        log_message = f"\033[93mACCESS\033[0m: {timestamp}     \033[90m{client_ip}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
         access_logger.info(log_message)
     
     def get_client_ip(self, request: Request) -> str:
