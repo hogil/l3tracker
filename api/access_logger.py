@@ -109,6 +109,15 @@ class AccessLogger:
         
         # 기본 정보 업데이트
         user_data["last_seen"] = today
+        
+        # Set이 list로 변환된 경우 다시 set으로 변환
+        if isinstance(user_data["ip_addresses"], list):
+            user_data["ip_addresses"] = set(user_data["ip_addresses"])
+        if isinstance(user_data["user_agents"], list):
+            user_data["user_agents"] = set(user_data["user_agents"])
+        if isinstance(user_data["unique_days"], list):
+            user_data["unique_days"] = set(user_data["unique_days"])
+            
         user_data["ip_addresses"].add(ip)
         user_data["user_agents"].add(user_agent[:100])  # 길이 제한
         user_data["unique_days"].add(today)
