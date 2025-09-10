@@ -27,7 +27,9 @@ from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
+from .access_logger import logger_instance
 from PIL import Image
 
 from . import config
@@ -258,6 +260,31 @@ THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 
 # ========== FastAPI ==========
 app = FastAPI(title="L3Tracker API", version="2.4.0")
+
+# 접속 추적 미들웨어
+class AccessTrackingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 사용자 ID 생성
+        client_ip = logger_instance.get_client_ip(request)
+        user_agent = request.headers.get("user-agent", "Unknown")
+        user_id = logger_instance.generate_user_id(client_ip, user_agent)
+        
+        # 요청 URL 경로
+        endpoint = str(request.url.path)
+        
+        # 정적 파일 및 파비콘은 로깅하지 않음
+        skip_paths = ["/favicon.ico", "/static/", "/js/"]
+        should_log = not any(endpoint.startswith(path) for path in skip_paths)
+        
+        if should_log:
+            logger_instance.log_access(request, user_id, endpoint)
+        
+        # 요청 처리
+        response = await call_next(request)
+        return response
+
+# 미들웨어 추가
+app.add_middleware(AccessTrackingMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
@@ -484,9 +511,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -513,7 +540,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
         items = directories + files
         if should_cache:
-            DIRLIST_CACHE.set(key, items)
+        DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -582,11 +609,11 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     if thumb.exists() and thumb.stat().st_size > 0:
         thumb_mtime = thumb.stat().st_mtime
         if thumb_mtime >= image_mtime:
-            cached = THUMB_STAT_CACHE.get(key)
-            if cached:
-                return thumb
-            THUMB_STAT_CACHE.set(key, True)
-            return thumb
+    cached = THUMB_STAT_CACHE.get(key)
+    if cached:
+        return thumb
+        THUMB_STAT_CACHE.set(key, True)
+        return thumb
 
     # 썸네일이 없거나 구버전이면 새로 생성
     async with THUMBNAIL_SEM:
@@ -594,8 +621,8 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
             if thumb_mtime >= image_mtime:
-                THUMB_STAT_CACHE.set(key, True)
-                return thumb
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
         if thumb.exists():
@@ -1248,6 +1275,31 @@ async def delete_classification(req: ClassifyDeleteRequest):
         logger.exception(f"분류 제거 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ========== 접속 통계 API ==========
+@app.get("/api/stats/daily")
+async def get_daily_stats():
+    """일별 접속 통계"""
+    return logger_instance.get_daily_stats()
+
+@app.get("/api/stats/users")
+async def get_user_stats():
+    """전체 사용자 통계"""
+    stats = []
+    for user_id in logger_instance.user_stats.keys():
+        stats.append(logger_instance.get_user_summary(user_id))
+    
+    # 총 요청 수 기준으로 정렬
+    stats.sort(key=lambda x: x.get("total_requests", 0), reverse=True)
+    return {"users": stats, "total_users": len(stats)}
+
+@app.get("/api/stats/user/{user_id}")
+async def get_user_detail(user_id: str):
+    """특정 사용자 상세 통계"""
+    if user_id not in logger_instance.user_stats:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
+    
+    return logger_instance.user_stats[user_id]
+
 # ========== 기타 ==========
 app.mount("/js", StaticFiles(directory="js"), name="js")
 app.mount("/static", StaticFiles(directory="."), name="static")
@@ -1262,6 +1314,18 @@ async def read_root():
     except Exception as e:
         logger.exception(f"루트 페이지 로드 실패: {e}")
         return {"error": "Failed to load main page"}
+
+@app.get("/stats")
+async def read_stats():
+    """접속 통계 대시보드"""
+    try:
+        stats_path = Path("stats.html")
+        if stats_path.exists():
+            return FileResponse(stats_path)
+        return {"message": "stats.html not found"}
+    except Exception as e:
+        logger.exception(f"통계 페이지 로드 실패: {e}")
+        return {"error": "Failed to load stats page"}
 
 @app.get("/main.js")
 async def get_main_js():
