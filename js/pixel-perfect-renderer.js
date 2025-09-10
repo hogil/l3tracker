@@ -141,7 +141,7 @@ class PixelPerfectRenderer {
     
     /**
      * 픽셀 샘플링 방식으로 축소 (왜곡 최소화)
-     * Nearest Neighbor 알고리즘 사용
+     * 개선된 Nearest Neighbor + Area Averaging 알고리즘 사용
      */
     drawPixelSampled() {
         const srcWidth = this.currentImage.width;
@@ -149,8 +149,14 @@ class PixelPerfectRenderer {
         const dstWidth = Math.floor(srcWidth * this.scale);
         const dstHeight = Math.floor(srcHeight * this.scale);
         
+        // 매우 작은 축소비(10% 이하)인 경우 특별 처리
+        if (this.scale <= 0.1) {
+            this.drawPixelSampledHighCompression();
+            return;
+        }
+        
         // 대용량 이미지의 경우 청크 단위로 처리
-        if (srcWidth * srcHeight > 16000000) { // 4000x4000 이상
+        if (srcWidth * srcHeight > 4000000) { // 2000x2000 이상
             this.drawPixelSampledChunked();
             return;
         }
@@ -160,6 +166,7 @@ class PixelPerfectRenderer {
         tempCanvas.width = srcWidth;
         tempCanvas.height = srcHeight;
         const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.imageSmoothingEnabled = false;
         tempCtx.drawImage(this.currentImage, 0, 0);
         
         // 원본 이미지 데이터 가져오기
@@ -173,32 +180,149 @@ class PixelPerfectRenderer {
         // 스케일 비율
         const scaleRatio = 1 / this.scale;
         
-        // 픽셀 샘플링 (Nearest Neighbor)
-        for (let y = 0; y < dstHeight; y++) {
-            for (let x = 0; x < dstWidth; x++) {
-                // 원본 좌표 계산 (가장 가까운 픽셀)
-                const srcX = Math.floor(x * scaleRatio);
-                const srcY = Math.floor(y * scaleRatio);
-                
-                // 경계 체크
-                if (srcX >= 0 && srcX < srcWidth && srcY >= 0 && srcY < srcHeight) {
-                    // 원본 픽셀 인덱스
-                    const srcIdx = (srcY * srcWidth + srcX) * 4;
+        // 10% ~ 50% 축소 시: Area Averaging으로 더 선명한 결과
+        if (this.scale >= 0.1 && this.scale < 0.5) {
+            this.drawAreaAveraged(srcPixels, srcWidth, srcHeight, dstPixels, dstWidth, dstHeight, scaleRatio);
+        } else {
+            // 기존 Nearest Neighbor (50% 이상)
+            for (let y = 0; y < dstHeight; y++) {
+                for (let x = 0; x < dstWidth; x++) {
+                    // 원본 좌표 계산 (가장 가까운 픽셀)
+                    const srcX = Math.floor(x * scaleRatio + 0.5);
+                    const srcY = Math.floor(y * scaleRatio + 0.5);
                     
-                    // 대상 픽셀 인덱스
-                    const dstIdx = (y * dstWidth + x) * 4;
-                    
-                    // 픽셀 복사 (정확한 색상 유지)
-                    dstPixels[dstIdx] = srcPixels[srcIdx];         // R
-                    dstPixels[dstIdx + 1] = srcPixels[srcIdx + 1]; // G
-                    dstPixels[dstIdx + 2] = srcPixels[srcIdx + 2]; // B
-                    dstPixels[dstIdx + 3] = srcPixels[srcIdx + 3]; // A
+                    // 경계 체크
+                    if (srcX >= 0 && srcX < srcWidth && srcY >= 0 && srcY < srcHeight) {
+                        // 원본 픽셀 인덱스
+                        const srcIdx = (srcY * srcWidth + srcX) * 4;
+                        
+                        // 대상 픽셀 인덱스
+                        const dstIdx = (y * dstWidth + x) * 4;
+                        
+                        // 픽셀 복사 (정확한 색상 유지)
+                        dstPixels[dstIdx] = srcPixels[srcIdx];         // R
+                        dstPixels[dstIdx + 1] = srcPixels[srcIdx + 1]; // G
+                        dstPixels[dstIdx + 2] = srcPixels[srcIdx + 2]; // B
+                        dstPixels[dstIdx + 3] = srcPixels[srcIdx + 3]; // A
+                    }
                 }
             }
         }
         
         // 결과 그리기
         this.ctx.putImageData(dstData, 0, 0);
+    }
+    
+    /**
+     * 극한 축소비(10% 이하)에서의 특별 처리
+     */
+    drawPixelSampledHighCompression() {
+        const srcWidth = this.currentImage.width;
+        const srcHeight = this.currentImage.height;
+        const dstWidth = Math.max(1, Math.floor(srcWidth * this.scale));
+        const dstHeight = Math.max(1, Math.floor(srcHeight * this.scale));
+        
+        // 임시 캔버스 생성
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = srcWidth;
+        tempCanvas.height = srcHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.imageSmoothingEnabled = false;
+        tempCtx.drawImage(this.currentImage, 0, 0);
+        
+        const srcData = tempCtx.getImageData(0, 0, srcWidth, srcHeight);
+        const srcPixels = srcData.data;
+        const dstData = this.ctx.createImageData(dstWidth, dstHeight);
+        const dstPixels = dstData.data;
+        
+        // 큰 영역을 대표하는 픽셀을 선택하는 대신 중요한 픽셀들의 평균을 계산
+        const blockWidth = Math.ceil(srcWidth / dstWidth);
+        const blockHeight = Math.ceil(srcHeight / dstHeight);
+        
+        for (let y = 0; y < dstHeight; y++) {
+            for (let x = 0; x < dstWidth; x++) {
+                let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+                let count = 0;
+                
+                // 블록 내의 모든 픽셀을 평균화
+                const startX = x * blockWidth;
+                const startY = y * blockHeight;
+                const endX = Math.min(startX + blockWidth, srcWidth);
+                const endY = Math.min(startY + blockHeight, srcHeight);
+                
+                for (let sy = startY; sy < endY; sy++) {
+                    for (let sx = startX; sx < endX; sx++) {
+                        const srcIdx = (sy * srcWidth + sx) * 4;
+                        totalR += srcPixels[srcIdx];
+                        totalG += srcPixels[srcIdx + 1];
+                        totalB += srcPixels[srcIdx + 2];
+                        totalA += srcPixels[srcIdx + 3];
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    const dstIdx = (y * dstWidth + x) * 4;
+                    dstPixels[dstIdx] = Math.round(totalR / count);
+                    dstPixels[dstIdx + 1] = Math.round(totalG / count);
+                    dstPixels[dstIdx + 2] = Math.round(totalB / count);
+                    dstPixels[dstIdx + 3] = Math.round(totalA / count);
+                }
+            }
+        }
+        
+        this.ctx.putImageData(dstData, 0, 0);
+    }
+    
+    /**
+     * Area Averaging 알고리즘으로 중간 축소비에서 더 선명한 결과
+     */
+    drawAreaAveraged(srcPixels, srcWidth, srcHeight, dstPixels, dstWidth, dstHeight, scaleRatio) {
+        for (let y = 0; y < dstHeight; y++) {
+            for (let x = 0; x < dstWidth; x++) {
+                // 소스 영역 계산
+                const srcX1 = x * scaleRatio;
+                const srcY1 = y * scaleRatio;
+                const srcX2 = (x + 1) * scaleRatio;
+                const srcY2 = (y + 1) * scaleRatio;
+                
+                // 정수 경계 계산
+                const x1 = Math.floor(srcX1);
+                const y1 = Math.floor(srcY1);
+                const x2 = Math.min(Math.ceil(srcX2), srcWidth);
+                const y2 = Math.min(Math.ceil(srcY2), srcHeight);
+                
+                let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+                let totalWeight = 0;
+                
+                // 영역 내 픽셀들의 가중 평균 계산
+                for (let sy = y1; sy < y2; sy++) {
+                    for (let sx = x1; sx < x2; sx++) {
+                        if (sx >= 0 && sx < srcWidth && sy >= 0 && sy < srcHeight) {
+                            // 가중치 계산 (픽셀이 얼마나 포함되는지)
+                            const weightX = Math.min(sx + 1, srcX2) - Math.max(sx, srcX1);
+                            const weightY = Math.min(sy + 1, srcY2) - Math.max(sy, srcY1);
+                            const weight = weightX * weightY;
+                            
+                            const srcIdx = (sy * srcWidth + sx) * 4;
+                            totalR += srcPixels[srcIdx] * weight;
+                            totalG += srcPixels[srcIdx + 1] * weight;
+                            totalB += srcPixels[srcIdx + 2] * weight;
+                            totalA += srcPixels[srcIdx + 3] * weight;
+                            totalWeight += weight;
+                        }
+                    }
+                }
+                
+                if (totalWeight > 0) {
+                    const dstIdx = (y * dstWidth + x) * 4;
+                    dstPixels[dstIdx] = Math.round(totalR / totalWeight);
+                    dstPixels[dstIdx + 1] = Math.round(totalG / totalWeight);
+                    dstPixels[dstIdx + 2] = Math.round(totalB / totalWeight);
+                    dstPixels[dstIdx + 3] = Math.round(totalA / totalWeight);
+                }
+            }
+        }
     }
     
     /**

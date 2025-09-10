@@ -37,7 +37,7 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
-# 단순화된 로깅 설정
+# 로깅 설정 - access_logger와 충돌 방지
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -56,19 +56,24 @@ LOGGING_CONFIG = {
     },
     "loggers": {
         "uvicorn": {
-            "handlers": ["console"],
-            "level": "INFO",
+            "handlers": [],
+            "level": "CRITICAL",  # 모든 uvicorn 로그 비활성화
             "propagate": False
         },
         "uvicorn.access": {
-            "handlers": ["console"],
+            "handlers": [],
+            "level": "CRITICAL",  # ACCESS 로그 완전 비활성화
+            "propagate": False
+        },
+        # access_logger는 별도 설정 유지
+        "access": {
             "level": "INFO",
             "propagate": False
         }
     }
 }
 
-# 로깅 설정 적용
+# 로깅 설정 적용 (access_logger 보호)
 logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger("l3tracker")
 
@@ -185,22 +190,41 @@ app = FastAPI(title="L3Tracker API", version="2.4.0")
 # 접속 추적 미들웨어 (단순화: IP만 로깅)
 class AccessTrackingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # 요청 처리
+        response = await call_next(request)
+        
         # 클라이언트 IP 주소 확보
         client_ip = logger_instance.get_client_ip(request)
         
         # 요청 URL 경로
         endpoint = str(request.url.path)
         
-        # 정적 파일 및 파비콘은 로깅하지 않음
-        skip_paths = ["/favicon.ico", "/static/", "/js/"]
+        # 로그에서 제외할 경로들 (필요한 사용자 액션은 제외하지 않음)
+        skip_paths = [
+            "/favicon.ico", "/static/", "/js/",
+            "/api/files/all"  # 인덱스 구축 요청만 제외 (이미지/썸네일은 사용자 액션이므로 허용)
+        ]
+        
+        # 너무 자주 반복되는 API 요청 제한
+        frequent_apis = ["/api/files", "/api/classes", "/api/current-folder", "/api/root-folder"]
+        
+        # 기본 제외 경로 체크
         should_log = not any(endpoint.startswith(path) for path in skip_paths)
         
-        # IP 기반 간단한 접속 로깅
-        if should_log:
-            logger_instance.log_access(request, endpoint)
+        # 자주 반복되는 API는 제한적으로만 로깅 (단, 사용자 액션은 항상 로깅)
+        if should_log and any(endpoint.startswith(api) for api in frequent_apis):
+            # 사용자 액션인지 확인
+            from .access_logger import AccessLogger
+            temp_logger = AccessLogger()
+            log_type = temp_logger._determine_log_type(endpoint, request.method)
+            
+            # 사용자 액션이 아닌 경우만 빈도 제한 적용
+            if log_type not in ['ACTION', 'IMAGE']:
+                should_log = logger_instance.should_log_frequent_api(client_ip, endpoint)
         
-        # 요청 처리
-        response = await call_next(request)
+        # IP 기반 간단한 접속 로깅 (응답 후 처리)
+        if should_log:
+            logger_instance.log_access(request, endpoint, response.status_code)
         
         return response
 
@@ -1410,5 +1434,6 @@ if __name__ == "__main__":
         port=config.DEFAULT_PORT,
         reload=config.DEFAULT_RELOAD,
         workers=config.DEFAULT_WORKERS,
-        log_level="info",
+        log_level="warning",  # 깔끔한 로깅을 위해 warning 레벨로 설정
+        access_log=False,     # uvicorn access 로그 완전 비활성화
     )

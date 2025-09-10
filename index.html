@@ -334,14 +334,20 @@
             transition: opacity 0.1s ease;
             will-change: opacity;
             transform: translateZ(0);
-            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 최적화 */
+            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 최적화 - 절대적 픽셀 정확도 */
             image-rendering: pixelated;
             image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            -ms-interpolation-mode: nearest-neighbor;
             /* 브라우저별 고품질 렌더링 */
             -webkit-backface-visibility: hidden;
             -webkit-transform: translate3d(0, 0, 0);
             backface-visibility: hidden;
+            /* 추가적인 픽셀 완벽 렌더링 설정 */
+            -webkit-font-smoothing: none;
+            -moz-osx-font-smoothing: unset;
+            filter: contrast(1) brightness(1);
         }
         
         .grid-thumb-img.lazy,

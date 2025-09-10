@@ -3,6 +3,7 @@
 
 import logging
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict, Counter
@@ -17,24 +18,24 @@ LOG_DIR.mkdir(exist_ok=True)
 ACCESS_LOG_FILE = LOG_DIR / "access.log"
 STATS_LOG_FILE = LOG_DIR / "stats.json"
 
-# 로거 설정
+# 로거 설정 - 로깅 시스템 충돌 방지
 access_logger = logging.getLogger("access")
 access_logger.setLevel(logging.INFO)
+access_logger.propagate = False  # 상위 로거로 전파 방지
+
+# 기존 핸들러 제거 (중복 방지)
+access_logger.handlers.clear()
 
 # 파일 핸들러 설정
-handler = logging.FileHandler(ACCESS_LOG_FILE, encoding='utf-8')
-formatter = logging.Formatter('%(message)s')
-handler.setFormatter(formatter)
-access_logger.addHandler(handler)
-
-# 콘솔 핸들러 추가
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-access_logger.addHandler(console_handler)
+file_handler = logging.FileHandler(ACCESS_LOG_FILE, encoding='utf-8')
+file_formatter = logging.Formatter('%(message)s')
+file_handler.setFormatter(file_formatter)
+access_logger.addHandler(file_handler)
 
 class AccessLogger:
     def __init__(self):
         self.stats_data: Dict[str, Any] = self._load_stats()
+        self.recent_api_calls: Dict[str, float] = {}  # IP+endpoint -> timestamp 매핑
     
     def _load_stats(self) -> Dict[str, Any]:
         """통계 데이터 로드"""
@@ -64,14 +65,52 @@ class AccessLogger:
         method = request.method
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
+        # 추가 정보 추출
+        extra_info = self._extract_extra_info(request, endpoint, method)
+        
         # 테이블 형식 로그 생성
-        self._log_table_format(timestamp, client_ip, method, endpoint, status_code)
+        self._log_table_format(timestamp, client_ip, method, endpoint, status_code, extra_info)
         
         # 통계 업데이트
         self._update_stats(client_ip, endpoint, method)
     
-    def _log_table_format(self, timestamp: str, ip: str, method: str, endpoint: str, status_code: int):
-        """테이블 형식 로그 출력"""
+    def _extract_extra_info(self, request: Request, endpoint: str, method: str) -> str:
+        """요청에서 파일명, 클래스명 등 추가 정보 추출"""
+        import urllib.parse
+        
+        query_params = dict(request.query_params)
+        
+        # 이미지/썸네일 요청에서 파일명 추출
+        if endpoint.startswith('/api/image') or endpoint.startswith('/api/thumbnail'):
+            path = query_params.get('path', '')
+            if path:
+                # 파일명만 추출 (경로 제거)
+                filename = path.split('/')[-1] if '/' in path else path
+                return f"[{filename}]"
+        
+        # 클래스 관련 요청
+        elif '/api/classes/' in endpoint:
+            parts = endpoint.split('/api/classes/')
+            if len(parts) > 1:
+                class_info = parts[1].split('/')[0]
+                return f"[{class_info}]"
+        
+        # POST 요청에서 body 정보 추출 (간단한 정보만)
+        elif method in ['POST', 'DELETE']:
+            if 'classify' in endpoint:
+                return "[분류작업]"
+            elif 'classes' in endpoint:
+                return "[클래스관리]"
+            elif 'labels' in endpoint:
+                return "[라벨관리]"
+        
+        return ""
+    
+    def _log_table_format(self, timestamp: str, ip: str, method: str, endpoint: str, status_code: int, extra_info: str = ""):
+        """완벽한 테이블 형식 로그 출력 - 요청 타입별 구분"""
+        # 로그 타입 결정
+        log_type_name = self._determine_log_type(endpoint, method)
+        
         # 메서드별 색상
         method_colors = {
             'GET': '\033[96m',     # 밝은 청록색
@@ -91,29 +130,91 @@ class AccessLogger:
         else:
             status_color = '\033[91m'  # 빨간색
         
-        # 컬럼 너비 고정
-        log_type = f"{'ACCESS:':<7}"
-        timestamp_col = f"{timestamp:<19}"
-        ip_col = f"{ip:<15}"
-        method_col = f"{method:<6}"
-        status_col = f"{status_code:<3}"
+        # 로그 타입별 색상
+        type_colors = {
+            'PAGE': '\033[92m',      # 초록색 - 페이지 접속
+            'API': '\033[96m',       # 청록색 - API 호출
+            'FILE': '\033[93m',      # 노란색 - 파일 요청
+            'AUTH': '\033[95m',      # 마젠타색 - 인증 관련
+            'ACTION': '\033[91m',    # 빨간색 - 사용자 액션 (클래스/라벨/분류)
+            'IMAGE': '\033[94m',     # 파란색 - 이미지 조회
+            'ERROR': '\033[91m'      # 빨간색 - 오류
+        }
+        type_color = type_colors.get(log_type_name, '\033[97m')
         
-        # 테이블 형식 로그 메시지
-        log_message = (
-            f"\033[93m{log_type}\033[0m {timestamp_col} "
-            f"\033[90m{ip_col}\033[0m {method_color}{method_col}\033[0m "
-            f"{endpoint:<30} {status_color}{status_col}\033[0m"
+        # 넉넉한 컬럼 정렬
+        log_type = f"{log_type_name:<10}"    # 10자리
+        timestamp_col = timestamp            # 19자리 (YYYY-MM-DD HH:MM:SS)
+        ip_col = f"{ip:<15}"                # 15자리
+        method_col = f"{method:<5}"          # 5자리 (GET=3, POST=4, DELETE=6)
+        endpoint_col = f"{endpoint:<35}"     # 35자리
+        status_col = f"{status_code:>3}"     # 3자리 (우측 정렬)
+        
+        # 추가 정보가 있으면 표시
+        extra_part = f" {extra_info}" if extra_info else ""
+        
+        # 구분된 테이블 형식 로그 (콜론 제거, 추가 정보 포함)
+        message = (
+            f"{type_color}{log_type}\033[0m    {timestamp_col}    "
+            f"\033[90m{ip_col}\033[0m   {method_color}{method_col}\033[0m   "
+            f"{endpoint_col}   {status_color}{status_col}\033[0m{extra_part}"
         )
         
-        access_logger.info(log_message)
+        # 콘솔에 테이블 형식으로 출력
+        print(message)
         
-        # INFO 로그도 동일한 형식으로 출력
-        info_message = (
-            f"\033[94mINFO:  \033[0m {timestamp_col} "
-            f"\033[90m{ip_col}\033[0m {method_color}{method_col}\033[0m "
-            f"{endpoint:<30} {status_color}{status_col}\033[0m"
-        )
-        access_logger.info(info_message)
+        # 파일에는 단순한 형식으로 저장
+        file_message = f"{log_type_name}: {timestamp} {ip:<15} {method:<6} {endpoint:<30} {status_code:>3}"
+        access_logger.info(file_message)
+    
+    def _determine_log_type(self, endpoint: str, method: str) -> str:
+        """엔드포인트와 메서드에 따라 로그 타입 결정"""
+        # 메인 페이지 접속
+        if endpoint in ['/', '/stats']:
+            return 'PAGE'
+        
+        # JavaScript/CSS 파일
+        elif endpoint.endswith(('.js', '.css', '.html')):
+            return 'FILE'
+        
+        # 인증 관련
+        elif any(auth_path in endpoint for auth_path in ['/api/set-username', '/register', '/login', '/auth']):
+            return 'AUTH'
+        
+        # 사용자 액션 (클래스/라벨/분류 작업)
+        elif self._is_user_action(endpoint, method):
+            return 'ACTION'
+        
+        # 이미지 조회 (실제 사용자가 이미지를 보는 행위)
+        elif endpoint.startswith('/api/image') or endpoint.startswith('/api/thumbnail'):
+            return 'IMAGE'
+        
+        # 일반 API 호출
+        elif endpoint.startswith('/api/'):
+            return 'API'
+        
+        # 기타
+        else:
+            return 'FILE'
+    
+    def _is_user_action(self, endpoint: str, method: str) -> bool:
+        """사용자 액션인지 판단"""
+        # POST/DELETE 메서드인 클래스/라벨/분류 작업
+        action_endpoints = [
+            '/api/classes', '/api/labels', '/api/classify'
+        ]
+        
+        if method in ['POST', 'DELETE']:
+            return any(endpoint.startswith(action_ep) for action_ep in action_endpoints)
+        
+        # 특정 GET 액션들 (이미지 분류 조회 등)
+        if method == 'GET':
+            if '/api/classes/' in endpoint and '/images' in endpoint:  # 클래스별 이미지 조회
+                return True
+            if endpoint.startswith('/api/labels/') and len(endpoint) > len('/api/labels/'):  # 특정 이미지 라벨 조회
+                return True
+        
+        return False
     
     def _update_stats(self, ip: str, endpoint: str, method: str):
         """통계 업데이트"""
@@ -154,43 +255,43 @@ class AccessLogger:
         # 일별 통계
         if today not in self.stats_data["daily_stats"]:
             self.stats_data["daily_stats"][today] = {
-                "active_users": set(),
-                "new_users": set(),
+                "active_users": [],
+                "new_users": [],
                 "total_requests": 0
             }
         
         daily = self.stats_data["daily_stats"][today]
-        daily["active_users"].add(user_id)
+        
+        # 중복 제거하며 추가
+        if user_id not in daily["active_users"]:
+            daily["active_users"].append(user_id)
         daily["total_requests"] += 1
         
         # 신규 사용자 체크
         if user_data["first_seen"] == today:
-            daily["new_users"].add(user_id)
-        
-        # 세트를 리스트로 변환 (JSON 직렬화용)
-        daily["active_users"] = list(daily["active_users"])
-        daily["new_users"] = list(daily["new_users"])
+            if user_id not in daily["new_users"]:
+                daily["new_users"].append(user_id)
         
         # 월별 통계
         month = today[:7]  # YYYY-MM
         if month not in self.stats_data["monthly_stats"]:
             self.stats_data["monthly_stats"][month] = {
-                "active_users": set(),
-                "new_users": set(),
+                "active_users": [],
+                "new_users": [],
                 "total_requests": 0,
                 "month_name": datetime.strptime(month + "-01", "%Y-%m-%d").strftime("%Y년 %m월")
             }
         
         monthly = self.stats_data["monthly_stats"][month]
-        monthly["active_users"].add(user_id)
+        
+        # 중복 제거하며 추가
+        if user_id not in monthly["active_users"]:
+            monthly["active_users"].append(user_id)
         monthly["total_requests"] += 1
         
         if user_data["first_seen"].startswith(month):
-            monthly["new_users"].add(user_id)
-        
-        # 세트를 리스트로 변환
-        monthly["active_users"] = list(monthly["active_users"])
-        monthly["new_users"] = list(monthly["new_users"])
+            if user_id not in monthly["new_users"]:
+                monthly["new_users"].append(user_id)
         
         # 통계 저장
         self._save_stats()
@@ -206,6 +307,27 @@ class AccessLogger:
             return real_ip
         
         return request.client.host if request.client else "unknown"
+    
+    def should_log_frequent_api(self, client_ip: str, endpoint: str) -> bool:
+        """자주 반복되는 API 호출 로깅 제한 (동일 IP+endpoint 조합을 5초간 한 번만 로깅)"""
+        now = time.time()
+        key = f"{client_ip}:{endpoint}"
+        
+        # 이전 호출 시간 확인
+        last_call = self.recent_api_calls.get(key, 0)
+        
+        # 5초 내 중복 호출이면 로깅 스킵
+        if now - last_call < 5.0:
+            return False
+        
+        # 현재 시간 기록
+        self.recent_api_calls[key] = now
+        
+        # 오래된 기록 정리 (10분 이상 된 것들)
+        cutoff = now - 600  # 10분
+        self.recent_api_calls = {k: v for k, v in self.recent_api_calls.items() if v > cutoff}
+        
+        return True
     
     # 통계 API 메서드들
     def get_daily_stats(self) -> Dict[str, Any]:

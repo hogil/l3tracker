@@ -3447,6 +3447,39 @@ class WaferMapViewer {
                 const isCtrl = e.ctrlKey || e.metaKey;
                 const isShift = e.shiftKey;
                 if (!isCtrl && !isShift) {
+                    // 🎯 크게보기 모드: 현재 표시 중인 이미지 바로 라벨링
+                    if (this.currentImagePath && !this.gridMode) {
+                        this.selectedClass = cls;
+                        if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
+                        
+                        const requestBody = { class_name: this.selectedClass, image_path: this.currentImagePath };
+                        console.log('🔥 크게보기 모드 분류 요청:', requestBody);
+                        
+                        const response = await fetch('/api/classify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error('분류 실패:', response.status, errorText);
+                        } else {
+                            console.log('✅ 크게보기 모드 라벨링 성공!');
+                        }
+                        
+                        // 버튼 색상 피드백
+                        const originalBg = btn.style.background;
+                        btn.style.background = '#2ecc40';
+                        setTimeout(() => {
+                            btn.style.background = originalBg;
+                            this.refreshLabelExplorer();
+                            // 추가로 강제 새로고침
+                            setTimeout(() => this.refreshLabelExplorer(), 100);
+                        }, 200);
+                        return;
+                    }
+                    
                     // grid 모드: 선택된 이미지들 모두 라벨링
                     if (this.gridMode && this.gridSelectedIdxs && this.gridSelectedIdxs.length > 0) {
                         this.selectedClass = cls;
@@ -3848,7 +3881,11 @@ class WaferMapViewer {
         if (this.gridMode && this.gridSelectedIdxs && this.gridSelectedIdxs.length > 0) {
             return this.gridSelectedIdxs.map(idx => this.selectedImages[idx]).filter(Boolean);
         }
-        // 단일 이미지 모드에서는 현재 선택된 이미지 반환
+        // 크게보기 모드에서는 현재 표시 중인 이미지 반환
+        if (this.currentImagePath) {
+            return [this.currentImagePath];
+        }
+        // 단일 이미지 모드에서는 현재 선택된 이미지 반환 (fallback)
         if (this.selectedImagePath) {
             return [this.selectedImagePath];
         }
