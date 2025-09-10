@@ -82,12 +82,12 @@ class UserNameLogFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             message = re.sub(pattern, replacement, message)
         
-        # 사용자명에 특별한 색상 적용 (하늘색)
+        # 사용자명에 특별한 색상 적용 (밝은 마젠타색 - 독특하게)
         for ip, user_name in USER_IP_MAPPING.items():
             if ip in message and user_name:
-                # 사용자명을 하늘색으로 (더 눈에 띄게)
+                # IP:포트를 사용자명으로 교체하고 밝은 마젠타색 적용
                 pattern = rf'\b{re.escape(ip)}:\d+\b'
-                replacement = f'\033[36m{user_name}\033[0m'  # 하늘색 사용자명
+                replacement = f'\033[95m{user_name}\033[0m'  # 밝은 마젠타색 사용자명
                 message = re.sub(pattern, replacement, message)
         
         return message

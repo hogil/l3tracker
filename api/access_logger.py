@@ -87,7 +87,7 @@ class AccessLogger:
             }
             method_color = method_colors.get(method, '\033[97m')  # 기본: 밝은 흰색
             
-            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[36m{display_name}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[92m200\033[0m"
+            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[95m{display_name}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[92m200\033[0m"
         else:
             log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[90mAnonymous\033[0m - \"\033[96m{method}\033[0m {endpoint} HTTP/1.1\" \033[92m200\033[0m"
         access_logger.info(log_message)
