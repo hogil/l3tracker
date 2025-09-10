@@ -284,10 +284,15 @@ class WaferMapViewer {
         this.imageCtx = this.dom.imageCanvas?.getContext('2d', { willReadFrequently: false });
         this.minimapCtx = this.dom.minimapCanvas?.getContext('2d', { willReadFrequently: false });
         
-        // 웨이퍼맵 픽셀 정확도를 위한 이미지 스무딩 비활성화
-        if (this.imageCtx) {
-            this.imageCtx.imageSmoothingEnabled = false;
-        }
+        // PixelPerfectRenderer 초기화
+        this.pixelRenderer = new PixelPerfectRenderer(this.dom.imageCanvas, {
+            minScale: 0.01,
+            maxScale: 10.0,
+            pixelSampling: true,
+            renderMode: 'pixelated'
+        });
+        
+        // 미니맵은 기존 방식 유지 (성능상)
         if (this.minimapCtx) {
             this.minimapCtx.imageSmoothingEnabled = false;
         }
@@ -2903,60 +2908,83 @@ class WaferMapViewer {
 
     draw() {
         if (!this.currentImage) return;
-        const { width, height } = this.dom.viewerContainer.getBoundingClientRect();
-        this.dom.imageCanvas.width = width;
-        this.dom.imageCanvas.height = height;
-        this.dom.imageCanvas.style.width = '100%';
-        this.dom.imageCanvas.style.height = '100%';
-        this.dom.imageCanvas.style.display = 'block';
-        this.dom.imageCanvas.style.margin = '0';
-        this.dom.imageCanvas.style.position = 'absolute';
-        this.dom.imageCanvas.style.left = '0';
-        this.dom.imageCanvas.style.top = '0';
-        this.dom.imageCanvas.style.right = '0';
-        this.dom.imageCanvas.style.bottom = '0';
-        this.dom.imageCanvas.style.zIndex = 1;
-        this.dom.viewerContainer.style.position = 'relative';
-        // Set canvas background to black
-        this.imageCtx.save();
-        this.imageCtx.setTransform(1, 0, 0, 1, 0, 0);
-        this.imageCtx.globalAlpha = 1.0;
-        this.imageCtx.fillStyle = '#000';
-        this.imageCtx.fillRect(0, 0, width, height);
-        this.imageCtx.restore();
-        // Draw the image
-        this.imageCtx.save();
-        this.imageCtx.translate(this.transform.dx, this.transform.dy);
-        this.imageCtx.scale(this.transform.scale, this.transform.scale);
-        this.imageCtx.drawImage(this.currentImage, 0, 0);
-        this.imageCtx.restore();
+        
+        // PixelPerfectRenderer를 사용한 픽셀 정확 렌더링
+        if (this.pixelRenderer) {
+            // 스케일 설정 및 렌더링
+            this.pixelRenderer.setScale(this.transform.scale);
+            this.pixelRenderer.loadImage(this.currentImage);
+            
+            // 캔버스 위치 설정 (pan 적용)
+            this.dom.imageCanvas.style.display = 'block';
+            this.dom.imageCanvas.style.position = 'absolute';
+            this.dom.imageCanvas.style.left = this.transform.dx + 'px';
+            this.dom.imageCanvas.style.top = this.transform.dy + 'px';
+            this.dom.imageCanvas.style.zIndex = 1;
+            this.dom.viewerContainer.style.position = 'relative';
+        } else {
+            // 폴백: 기존 Canvas 방식
+            const { width, height } = this.dom.viewerContainer.getBoundingClientRect();
+            this.dom.imageCanvas.width = width;
+            this.dom.imageCanvas.height = height;
+            this.dom.imageCanvas.style.width = '100%';
+            this.dom.imageCanvas.style.height = '100%';
+            this.dom.imageCanvas.style.display = 'block';
+            this.dom.imageCanvas.style.position = 'absolute';
+            this.dom.imageCanvas.style.left = '0';
+            this.dom.imageCanvas.style.top = '0';
+            this.dom.imageCanvas.style.zIndex = 1;
+            
+            this.imageCtx.save();
+            this.imageCtx.fillStyle = '#000';
+            this.imageCtx.fillRect(0, 0, width, height);
+            this.imageCtx.translate(this.transform.dx, this.transform.dy);
+            this.imageCtx.scale(this.transform.scale, this.transform.scale);
+            this.imageCtx.drawImage(this.currentImage, 0, 0);
+            this.imageCtx.restore();
+        }
+        
         this.updateMinimap();
     }
     
     resetView(shouldDraw = true) {
         if (!this.currentImage) return;
-        const containerRect = this.dom.viewerContainer.getBoundingClientRect();
-        // 컨테이너 경계선/스크롤 영향으로 인한 미세 클리핑 방지용 보정치(2px)
-        const effectiveW = Math.max(0, containerRect.width - 2);
-        const effectiveH = Math.max(0, containerRect.height - 2);
-        const imgRatio = this.currentImage.width / this.currentImage.height;
-        const containerRatio = effectiveW / effectiveH;
-        const fitScale = (imgRatio > containerRatio)
-            ? effectiveW / this.currentImage.width
-            : effectiveH / this.currentImage.height;
-        // 기본은 상대 여유 적용 (초기 로드 등 일반 맞춤)
-        this.transform.scale = fitScale * FIT_RELATIVE_MARGIN;
-        // 파일명 패널 높이 고려 (CSS 변수에서 가져오기)
-        const filenameBarHeight = 56; // --filename-bar-height와 동일
         
-        // 이미지 크기를 조정 (파일명 패널과 겹치지 않도록)
-        this.transform.scale = fitScale * FIT_RELATIVE_MARGIN * 0.96; // 99%로 조정
+        if (this.pixelRenderer) {
+            // PixelPerfectRenderer 사용 시
+            const containerRect = this.dom.viewerContainer.getBoundingClientRect();
+            const filenameBarHeight = 56; // --filename-bar-height와 동일
+            const effectiveW = Math.max(0, containerRect.width - 2);
+            const effectiveH = Math.max(0, containerRect.height - filenameBarHeight - 2);
+            
+            // 화면에 맞춤 (96% 여유)
+            const fitScale = this.pixelRenderer.fitToContainer(effectiveW, effectiveH, FIT_RELATIVE_MARGIN * 0.96);
+            
+            // transform 동기화 (pan 기능을 위해)
+            this.transform.scale = fitScale;
+            this.transform.dx = (containerRect.width - this.currentImage.width * fitScale) / 2;
+            this.transform.dy = (containerRect.height - this.currentImage.height * fitScale) / 2 + (filenameBarHeight * 0.4);
+            
+            this.updateZoomDisplay();
+            
+        } else {
+            // 기존 방식
+            const containerRect = this.dom.viewerContainer.getBoundingClientRect();
+            const effectiveW = Math.max(0, containerRect.width - 2);
+            const effectiveH = Math.max(0, containerRect.height - 2);
+            const imgRatio = this.currentImage.width / this.currentImage.height;
+            const containerRatio = effectiveW / effectiveH;
+            const fitScale = (imgRatio > containerRatio)
+                ? effectiveW / this.currentImage.width
+                : effectiveH / this.currentImage.height;
+            
+            const filenameBarHeight = 56;
+            this.transform.scale = fitScale * FIT_RELATIVE_MARGIN * 0.96;
+            this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
+            this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
+            this.updateZoomDisplay();
+        }
         
-        // 실제 센터링은 전체 컨테이너 크기 기준으로 적용 (시각적 중앙 정렬)
-        this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
-        // 파일명 패널 높이를 고려하여 적절히 위치 조정 (위로 이동)
-        this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
-        this.updateZoomDisplay();
         if (shouldDraw) this.scheduleDraw();
     }
 
@@ -3029,15 +3057,41 @@ class WaferMapViewer {
     }
     
     zoomAtCenter(factor) {
-        const viewerRect = this.dom.viewerContainer.getBoundingClientRect();
-        this.zoomAtPoint(factor, viewerRect.left + viewerRect.width / 2, viewerRect.top + viewerRect.height / 2);
+        if (this.pixelRenderer) {
+            // PixelPerfectRenderer 사용 시
+            if (factor > 1) {
+                this.pixelRenderer.zoomIn(factor);
+            } else {
+                this.pixelRenderer.zoomOut(factor);
+            }
+            
+            // transform 동기화
+            this.transform.scale = this.pixelRenderer.scale;
+            this.updateZoomDisplay();
+            this.scheduleDraw();
+            
+        } else {
+            // 기존 방식
+            const viewerRect = this.dom.viewerContainer.getBoundingClientRect();
+            this.zoomAtPoint(factor, viewerRect.left + viewerRect.width / 2, viewerRect.top + viewerRect.height / 2);
+        }
     }
 
     setZoom(level) {
-        const scale = level;
-        const currentScale = this.transform.scale;
-        const factor = scale / currentScale;
-        this.zoomAtCenter(factor);
+        if (this.pixelRenderer) {
+            // PixelPerfectRenderer 사용 시
+            this.pixelRenderer.setScale(level);
+            this.transform.scale = level;
+            this.updateZoomDisplay();
+            this.scheduleDraw();
+            
+        } else {
+            // 기존 방식
+            const scale = level;
+            const currentScale = this.transform.scale;
+            const factor = scale / currentScale;
+            this.zoomAtCenter(factor);
+        }
     }
 
     // 리셋 버튼 전용: 초기 이미지 크기와 배치와 동일하게 적용
