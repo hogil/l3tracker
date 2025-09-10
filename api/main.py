@@ -553,8 +553,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     cached = None
-    if should_cache:
-    cached = DIRLIST_CACHE.get(key)
+    if should_cache:    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -582,8 +581,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             logger.info(f"정렬된 디렉터리 순서: {[d['name'] for d in directories[:5]]}")
 
         items = directories + files
-        if should_cache:
-        DIRLIST_CACHE.set(key, items)
+        if should_cache:        DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
