@@ -754,7 +754,12 @@
         <aside class="sidebar" aria-label="파일 탐색기">
             <header class="panel-header">
                 <span>Wafer Map Explorer</span>
-                <button id="change-folder-btn" class="grid-btn" style="margin-left: auto; padding: 4px 8px; font-size: 12px;" aria-label="폴더 변경">📁</button>
+                <div style="display: flex; gap: 8px; margin-left: auto; align-items: center;">
+                    <input id="user-name-input" type="text" placeholder="사용자 이름" 
+                           style="background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 11px; width: 80px;"
+                           title="사용자 이름을 입력하세요">
+                    <button id="change-folder-btn" class="grid-btn" style="padding: 4px 8px; font-size: 12px;" aria-label="폴더 변경">📁</button>
+                </div>
             </header>
             
             <!-- Folder Selection -->

@@ -184,6 +184,43 @@ class AccessLogger:
                 daily_stats["total_requests_today"] += user_data["daily_requests"][today]
         
         return daily_stats
+    
+    def get_daily_trend(self, days: int = 7) -> Dict[str, Any]:
+        """일별 트렌드 (최근 N일)"""
+        from datetime import datetime, timedelta
+        
+        trend_data = {}
+        base_date = datetime.now().date()
+        
+        for i in range(days):
+            target_date = (base_date - timedelta(days=i)).isoformat()
+            
+            day_stats = {
+                "date": target_date,
+                "active_users": 0,
+                "new_users": 0,
+                "total_requests": 0,
+                "user_list": []
+            }
+            
+            for user_id, user_data in self.user_stats.items():
+                # 해당 날짜에 활성
+                if target_date in user_data["daily_requests"]:
+                    day_stats["active_users"] += 1
+                    day_stats["total_requests"] += user_data["daily_requests"][target_date]
+                    day_stats["user_list"].append({
+                        "user_id": user_id,
+                        "requests": user_data["daily_requests"][target_date],
+                        "ip": list(user_data["ip_addresses"])[0] if user_data["ip_addresses"] else "unknown"
+                    })
+                
+                # 해당 날짜에 신규
+                if user_data["first_seen"] == target_date:
+                    day_stats["new_users"] += 1
+            
+            trend_data[target_date] = day_stats
+        
+        return trend_data
 
 # 전역 인스턴스
 logger_instance = AccessLogger()

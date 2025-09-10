@@ -221,6 +221,7 @@ class WaferMapViewer {
     constructor() {
         this.cacheDom();
         this.initState();
+        this.setupUserName();
         this.bindEvents();
         this.init();
         // 디바운싱된 showGrid
@@ -329,6 +330,9 @@ class WaferMapViewer {
         // 클래스 선택 상태 초기화 (Label Explorer와 Class Manager가 공유)
         this.classSelection = { selected: [], lastClicked: null };
         this.labelSelection = { selected: [], lastClicked: null, openFolders: {}, selectedClasses: [] };
+        
+        // 사용자 이름 상태
+        this.userName = localStorage.getItem('l3tracker_username') || '';
 
         // Bind 'this' for event handlers that are dynamically added/removed
         this.boundHandleMouseMove = this.handleMouseMove.bind(this);

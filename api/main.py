@@ -511,9 +511,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -619,8 +619,8 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
             if thumb_mtime >= image_mtime:
-                THUMB_STAT_CACHE.set(key, True)
-                return thumb
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
         if thumb.exists():
@@ -1279,12 +1279,24 @@ async def get_daily_stats():
     """일별 접속 통계"""
     return logger_instance.get_daily_stats()
 
+@app.get("/api/stats/trend")
+async def get_trend_stats(days: int = Query(7, ge=1, le=30)):
+    """일별 트렌드 통계"""
+    return logger_instance.get_daily_trend(days)
+
 @app.get("/api/stats/users")
 async def get_user_stats():
     """전체 사용자 통계"""
     stats = []
     for user_id in logger_instance.user_stats.keys():
-        stats.append(logger_instance.get_user_summary(user_id))
+        user_summary = logger_instance.get_user_summary(user_id)
+        user_data = logger_instance.user_stats[user_id]
+        
+        # IP 주소도 포함
+        user_summary["ip_addresses"] = list(user_data["ip_addresses"]) if isinstance(user_data["ip_addresses"], (set, list)) else []
+        user_summary["primary_ip"] = user_summary["ip_addresses"][0] if user_summary["ip_addresses"] else "unknown"
+        
+        stats.append(user_summary)
     
     # 총 요청 수 기준으로 정렬
     stats.sort(key=lambda x: x.get("total_requests", 0), reverse=True)
@@ -1296,7 +1308,17 @@ async def get_user_detail(user_id: str):
     if user_id not in logger_instance.user_stats:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
     
-    return logger_instance.user_stats[user_id]
+    user_data = logger_instance.user_stats[user_id].copy()
+    
+    # Set을 list로 변환 (JSON 직렬화)
+    if isinstance(user_data["ip_addresses"], set):
+        user_data["ip_addresses"] = list(user_data["ip_addresses"])
+    if isinstance(user_data["user_agents"], set):
+        user_data["user_agents"] = list(user_data["user_agents"])
+    if isinstance(user_data["unique_days"], set):
+        user_data["unique_days"] = list(user_data["unique_days"])
+    
+    return user_data
 
 # ========== 기타 ==========
 app.mount("/js", StaticFiles(directory="js"), name="js")

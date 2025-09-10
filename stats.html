@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L3Tracker 접속 통계</title>
+    <title>웨이퍼맵 뷰어 접속 분석</title>
     <style>
         * {
             margin: 0;
@@ -13,158 +13,412 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a1a;
+            background: #0f0f0f;
             color: #ffffff;
             padding: 20px;
+            line-height: 1.6;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
         }
         
         .header {
             text-align: center;
             margin-bottom: 30px;
-            padding: 20px;
-            background: #2a2a2a;
-            border-radius: 10px;
+            padding: 25px;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 8px;
+            background: linear-gradient(45deg, #4CAF50, #81C784);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+            justify-content: center;
+        }
+        
+        .btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        }
+        
+        .btn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+        }
+        
+        .btn.secondary {
+            background: #2196F3;
+            box-shadow: 0 4px 15px rgba(33, 150, 243, 0.3);
+        }
+        
+        .btn.secondary:hover {
+            background: #1976D2;
+            box-shadow: 0 6px 20px rgba(33, 150, 243, 0.4);
+        }
+        
+        .stats-section {
+            margin-bottom: 30px;
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #4CAF50;
+            border-left: 4px solid #4CAF50;
+            padding-left: 12px;
         }
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         
         .stat-card {
-            background: #2a2a2a;
-            padding: 20px;
-            border-radius: 10px;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 25px;
+            border-radius: 12px;
             text-align: center;
-            border: 1px solid #444;
+            border: 1px solid #333;
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: #4CAF50;
         }
         
         .stat-value {
-            font-size: 2rem;
+            font-size: 2.5rem;
             font-weight: bold;
             color: #4CAF50;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            text-shadow: 0 0 20px rgba(76, 175, 80, 0.5);
         }
         
         .stat-label {
-            font-size: 0.9rem;
+            font-size: 1rem;
             color: #aaa;
+            font-weight: 500;
+        }
+        
+        .trend-chart {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid #333;
+        }
+        
+        .chart-container {
+            height: 300px;
+            position: relative;
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 20px;
         }
         
         .user-table {
-            background: #2a2a2a;
-            border-radius: 10px;
+            background: #1a1a2e;
+            border-radius: 12px;
             overflow: hidden;
             margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
         
         .table-header {
-            background: #333;
-            padding: 15px 20px;
+            background: linear-gradient(135deg, #2a2a2a, #333);
+            padding: 20px;
             font-weight: bold;
+            font-size: 1.2rem;
         }
         
         .table-content {
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
         }
         
         .user-row {
             display: grid;
-            grid-template-columns: 120px 1fr 100px 100px 150px 150px;
-            padding: 10px 20px;
-            border-bottom: 1px solid #444;
+            grid-template-columns: 130px 120px 1fr 80px 80px 120px 120px;
+            padding: 15px 20px;
+            border-bottom: 1px solid #333;
             align-items: center;
+            cursor: pointer;
+            transition: background 0.3s ease;
         }
         
         .user-row:hover {
-            background: #333;
+            background: #2a2a3e;
+        }
+        
+        .user-row.clickable:hover {
+            background: #1e3c72;
         }
         
         .user-id {
-            font-family: monospace;
+            font-family: 'Courier New', monospace;
             font-size: 0.9rem;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .ip-address {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #2196F3;
+        }
+        
+        .daily-trend {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid #333;
+        }
+        
+        .trend-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            background: #2a2a3e;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .trend-item:hover {
+            background: #3a3a4e;
+            transform: translateX(5px);
+        }
+        
+        .trend-date {
+            font-weight: bold;
             color: #4CAF50;
         }
         
-        .refresh-btn {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1rem;
-            margin-bottom: 20px;
+        .trend-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 0.9rem;
         }
         
-        .refresh-btn:hover {
-            background: #45a049;
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal-content {
+            background: #1a1a2e;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid #4CAF50;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+        
+        .close:hover {
+            color: #f44336;
         }
         
         .loading {
             text-align: center;
-            padding: 20px;
+            padding: 40px;
             color: #aaa;
+            font-size: 1.2rem;
         }
         
         .error {
             color: #f44336;
             text-align: center;
-            padding: 20px;
+            padding: 40px;
+            background: #2a1a1a;
+            border-radius: 8px;
+            border: 1px solid #f44336;
+        }
+        
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .detail-card {
+            background: #2a2a3e;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+        
+        .detail-title {
+            font-size: 0.9rem;
+            color: #aaa;
+            margin-bottom: 5px;
+        }
+        
+        .detail-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .activity-list {
+            background: #2a2a3e;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .activity-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #444;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+        
+        .activity-item:last-child {
+            border-bottom: none;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔗 L3Tracker 접속 통계</h1>
-            <p>실시간 사용자 접속 현황 및 통계</p>
+            <h1>📊 웨이퍼맵 뷰어 접속 분석</h1>
+            <p>실시간 사용자 접속 현황 및 상세 통계 분석</p>
         </div>
         
-        <button class="refresh-btn" onclick="loadStats()">🔄 새로고침</button>
-        
-        <div class="stats-grid" id="dailyStats">
-            <div class="loading">통계 로딩 중...</div>
+        <div class="controls">
+            <button class="btn" onclick="loadStats()">🔄 새로고침</button>
+            <button class="btn secondary" onclick="toggleTrendDays()">📈 트렌드 기간 변경</button>
+            <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
         </div>
         
-        <div class="user-table">
-            <div class="table-header">
-                👥 사용자 목록 (활동량 순)
+        <div class="stats-section">
+            <h2 class="section-title">📋 오늘 요약</h2>
+            <div class="stats-grid" id="dailyStats">
+                <div class="loading">통계 로딩 중...</div>
             </div>
-            <div class="table-content" id="userTable">
-                <div class="loading">사용자 데이터 로딩 중...</div>
+        </div>
+        
+        <div class="stats-section">
+            <h2 class="section-title">📈 일별 접속 트렌드 (최근 7일)</h2>
+            <div class="daily-trend" id="trendData">
+                <div class="loading">트렌드 데이터 로딩 중...</div>
+            </div>
+        </div>
+        
+        <div class="stats-section">
+            <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
+            <div class="user-table">
+                <div class="table-header">
+                    총 사용자: <span id="totalUsers">-</span>명
+                </div>
+                <div class="table-content" id="userTable">
+                    <div class="loading">사용자 데이터 로딩 중...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 사용자 상세 정보 모달 -->
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">사용자 상세 정보</h2>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modalBody">
+                <div class="loading">로딩 중...</div>
             </div>
         </div>
     </div>
 
     <script>
+        let currentTrendDays = 7;
+        
         async function loadStats() {
             try {
-                // 일일 통계 로드
-                const dailyResponse = await fetch('/api/stats/daily');
-                const dailyData = await dailyResponse.json();
+                // 병렬로 모든 데이터 로드
+                const [dailyResponse, trendResponse, usersResponse] = await Promise.all([
+                    fetch('/api/stats/daily'),
+                    fetch(`/api/stats/trend?days=${currentTrendDays}`),
+                    fetch('/api/stats/users')
+                ]);
                 
-                // 사용자 통계 로드
-                const usersResponse = await fetch('/api/stats/users');
+                const dailyData = await dailyResponse.json();
+                const trendData = await trendResponse.json();
                 const usersData = await usersResponse.json();
                 
                 renderDailyStats(dailyData);
+                renderTrendData(trendData);
                 renderUserTable(usersData.users);
+                
+                document.getElementById('totalUsers').textContent = usersData.total_users;
                 
             } catch (error) {
                 console.error('통계 로드 실패:', error);
-                document.getElementById('dailyStats').innerHTML = 
-                    '<div class="error">통계 로드에 실패했습니다.</div>';
-                document.getElementById('userTable').innerHTML = 
-                    '<div class="error">사용자 데이터 로드에 실패했습니다.</div>';
+                showError('통계 로드에 실패했습니다.');
             }
         }
         
@@ -190,6 +444,37 @@
             `;
         }
         
+        function renderTrendData(data) {
+            const container = document.getElementById('trendData');
+            
+            // 날짜순으로 정렬 (최신순)
+            const sortedDates = Object.keys(data).sort().reverse();
+            
+            let html = '';
+            sortedDates.forEach(date => {
+                const dayData = data[date];
+                const isToday = date === new Date().toISOString().split('T')[0];
+                
+                html += `
+                    <div class="trend-item" onclick="showDayDetail('${date}')" data-date="${date}">
+                        <div>
+                            <span class="trend-date">${formatDate(date)} ${isToday ? '(오늘)' : ''}</span>
+                        </div>
+                        <div class="trend-stats">
+                            <span>👥 ${dayData.active_users}명</span>
+                            <span>🆕 ${dayData.new_users}명</span>
+                            <span>📊 ${dayData.total_requests}회</span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            
+            // 전역 변수에 저장 (상세 보기용)
+            window.trendData = data;
+        }
+        
         function renderUserTable(users) {
             const container = document.getElementById('userTable');
             
@@ -201,31 +486,204 @@
             let html = `
                 <div class="user-row" style="background: #333; font-weight: bold;">
                     <div>사용자 ID</div>
+                    <div>IP 주소</div>
                     <div>최근 접속</div>
                     <div>총 요청</div>
                     <div>접속 일수</div>
                     <div>첫 접속</div>
-                    <div>주요 엔드포인트</div>
+                    <div>주요 기능</div>
                 </div>
             `;
             
             users.forEach(user => {
                 const mostUsedEndpoint = user.most_used_endpoint ? 
-                    `${user.most_used_endpoint[0]} (${user.most_used_endpoint[1]})` : 'N/A';
+                    `${user.most_used_endpoint[0].replace('/api/', '')} (${user.most_used_endpoint[1]})` : 'N/A';
                 
                 html += `
-                    <div class="user-row">
+                    <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')">
                         <div class="user-id">${user.user_id}</div>
-                        <div>${user.last_seen}</div>
+                        <div class="ip-address">${user.primary_ip}</div>
+                        <div>${formatDate(user.last_seen)}</div>
                         <div>${user.total_requests}</div>
                         <div>${user.unique_days}일</div>
-                        <div>${user.first_seen}</div>
-                        <div style="font-size: 0.8rem;">${mostUsedEndpoint}</div>
+                        <div>${formatDate(user.first_seen)}</div>
+                        <div style="font-size: 0.8rem; color: #aaa;">${mostUsedEndpoint}</div>
                     </div>
                 `;
             });
             
             container.innerHTML = html;
+        }
+        
+        async function showUserDetail(userId) {
+            try {
+                const response = await fetch(`/api/stats/user/${userId}`);
+                const userData = await response.json();
+                
+                document.getElementById('modalTitle').textContent = `사용자 상세: ${userId}`;
+                
+                const modalBody = document.getElementById('modalBody');
+                modalBody.innerHTML = `
+                    <div class="detail-grid">
+                        <div class="detail-card">
+                            <div class="detail-title">사용자 ID</div>
+                            <div class="detail-value" style="font-family: monospace;">${userId}</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">총 요청 수</div>
+                            <div class="detail-value">${userData.total_requests}</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">접속 일수</div>
+                            <div class="detail-value">${userData.unique_days.length}일</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">첫 접속</div>
+                            <div class="detail-value">${formatDate(userData.first_seen)}</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">최근 접속</div>
+                            <div class="detail-value">${formatDate(userData.last_seen)}</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">사용 IP</div>
+                            <div class="detail-value" style="font-family: monospace; font-size: 1rem;">${userData.ip_addresses.join(', ')}</div>
+                        </div>
+                    </div>
+                    
+                    <h3 style="margin: 20px 0 10px 0; color: #4CAF50;">📊 일별 활동</h3>
+                    <div class="activity-list">
+                        ${Object.entries(userData.daily_requests)
+                            .sort(([a], [b]) => b.localeCompare(a))
+                            .map(([date, count]) => `
+                                <div class="activity-item">
+                                    ${formatDate(date)}: ${count}회 요청
+                                </div>
+                            `).join('')}
+                    </div>
+                    
+                    <h3 style="margin: 20px 0 10px 0; color: #4CAF50;">🔧 기능 사용 통계</h3>
+                    <div class="activity-list">
+                        ${Object.entries(userData.endpoints)
+                            .sort(([,a], [,b]) => b - a)
+                            .map(([endpoint, count]) => `
+                                <div class="activity-item">
+                                    ${endpoint.replace('/api/', '')}: ${count}회
+                                </div>
+                            `).join('')}
+                    </div>
+                `;
+                
+                document.getElementById('userModal').style.display = 'block';
+                
+            } catch (error) {
+                console.error('사용자 상세 정보 로드 실패:', error);
+                alert('사용자 상세 정보를 불러올 수 없습니다.');
+            }
+        }
+        
+        function showDayDetail(date) {
+            if (!window.trendData || !window.trendData[date]) return;
+            
+            const dayData = window.trendData[date];
+            
+            document.getElementById('modalTitle').textContent = `${formatDate(date)} 접속 상세`;
+            
+            const modalBody = document.getElementById('modalBody');
+            modalBody.innerHTML = `
+                <div class="detail-grid">
+                    <div class="detail-card">
+                        <div class="detail-title">활성 사용자</div>
+                        <div class="detail-value">${dayData.active_users}명</div>
+                    </div>
+                    <div class="detail-card">
+                        <div class="detail-title">신규 사용자</div>
+                        <div class="detail-value">${dayData.new_users}명</div>
+                    </div>
+                    <div class="detail-card">
+                        <div class="detail-title">총 요청 수</div>
+                        <div class="detail-value">${dayData.total_requests}회</div>
+                    </div>
+                </div>
+                
+                <h3 style="margin: 20px 0 10px 0; color: #4CAF50;">👥 접속 사용자 목록</h3>
+                <div class="activity-list">
+                    ${dayData.user_list
+                        .sort((a, b) => b.requests - a.requests)
+                        .map(user => `
+                            <div class="activity-item" onclick="showUserDetail('${user.user_id}')" style="cursor: pointer;">
+                                <span style="color: #4CAF50;">${user.user_id}</span>
+                                <span style="color: #2196F3; margin-left: 10px;">${user.ip}</span>
+                                <span style="margin-left: 10px;">${user.requests}회 요청</span>
+                            </div>
+                        `).join('')}
+                </div>
+            `;
+            
+            document.getElementById('userModal').style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('userModal').style.display = 'none';
+        }
+        
+        function toggleTrendDays() {
+            const days = prompt('트렌드 기간을 입력하세요 (1-30일):', currentTrendDays);
+            if (days && !isNaN(days) && days >= 1 && days <= 30) {
+                currentTrendDays = parseInt(days);
+                loadStats();
+            }
+        }
+        
+        function exportStats() {
+            // 현재 통계를 JSON으로 다운로드
+            const data = {
+                daily: window.dailyData,
+                trend: window.trendData,
+                users: window.usersData,
+                exported_at: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `l3tracker_stats_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+            
+            if (dateStr === today.toISOString().split('T')[0]) {
+                return '오늘';
+            } else if (dateStr === yesterday.toISOString().split('T')[0]) {
+                return '어제';
+            } else {
+                return date.toLocaleDateString('ko-KR', { 
+                    month: 'short', 
+                    day: 'numeric',
+                    weekday: 'short'
+                });
+            }
+        }
+        
+        function showError(message) {
+            document.getElementById('dailyStats').innerHTML = `<div class="error">${message}</div>`;
+            document.getElementById('trendData').innerHTML = `<div class="error">${message}</div>`;
+            document.getElementById('userTable').innerHTML = `<div class="error">${message}</div>`;
+        }
+        
+        // 모달 외부 클릭 시 닫기
+        window.onclick = function(event) {
+            const modal = document.getElementById('userModal');
+            if (event.target === modal) {
+                closeModal();
+            }
         }
         
         // 페이지 로드 시 통계 로드
