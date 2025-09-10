@@ -303,13 +303,11 @@ THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 # ========== FastAPI ==========
 app = FastAPI(title="L3Tracker API", version="2.4.0")
 
-# 접속 추적 미들웨어
+# 접속 추적 미들웨어 (단순화: IP만 로깅)
 class AccessTrackingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # 사용자 ID 생성
+        # 클라이언트 IP 주소 확보
         client_ip = logger_instance.get_client_ip(request)
-        user_agent = request.headers.get("user-agent", "Unknown")
-        user_id = logger_instance.generate_user_id(client_ip, user_agent)
         
         # 요청 URL 경로
         endpoint = str(request.url.path)
@@ -318,12 +316,9 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         skip_paths = ["/favicon.ico", "/static/", "/js/"]
         should_log = not any(endpoint.startswith(path) for path in skip_paths)
         
-        # 사용자 통계 먼저 업데이트 (display_name 확보용)
+        # IP 기반 간단한 접속 로깅
         if should_log:
-            logger_instance.update_stats(user_id, client_ip, endpoint, user_agent)
-            
-            
-            logger_instance.log_access(request, user_id, endpoint)
+            logger_instance.log_access(request, endpoint)
         
         # 요청 처리
         response = await call_next(request)
@@ -559,9 +554,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     key = str(target)
     cached = None
     if should_cache:
-    cached = DIRLIST_CACHE.get(key)
-    if cached is not None:
-        return cached
+        cached = DIRLIST_CACHE.get(key)
+        if cached is not None:
+            return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -587,7 +582,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             logger.info(f"정렬된 디렉터리 순서: {[d['name'] for d in directories[:5]]}")
 
         items = directories + files
-        if should_cache:DIRLIST_CACHE.set(key, items)
+        if should_cache:
+            DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -1320,7 +1316,7 @@ async def delete_classification(req: ClassifyDeleteRequest):
         logger.exception(f"분류 제거 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ========== 접속 통계 API ==========
+# ========== 접속 통계 API (단순화) ==========
 @app.get("/api/stats/daily")
 async def get_daily_stats():
     """일별 접속 통계"""
@@ -1335,92 +1331,6 @@ async def get_trend_stats(days: int = Query(7, ge=1, le=30)):
 async def get_monthly_stats(months: int = Query(3, ge=1, le=12)):
     """월별 트렌드 통계"""
     return logger_instance.get_monthly_trend(months)
-
-@app.get("/api/stats/users")
-async def get_user_stats():
-    """전체 사용자 통계"""
-    stats = []
-    for user_id in logger_instance.user_stats.keys():
-        user_summary = logger_instance.get_user_summary(user_id)
-        user_data = logger_instance.user_stats[user_id]
-        
-        # IP 주소와 표시 이름 포함
-        user_summary["ip_addresses"] = list(user_data["ip_addresses"]) if isinstance(user_data["ip_addresses"], (set, list)) else []
-        user_summary["primary_ip"] = user_summary["ip_addresses"][0] if user_summary["ip_addresses"] else "unknown"
-        user_summary["display_name"] = user_data.get("display_name", "")
-        
-        stats.append(user_summary)
-    
-    # 총 요청 수 기준으로 정렬
-    stats.sort(key=lambda x: x.get("total_requests", 0), reverse=True)
-    return {"users": stats, "total_users": len(stats)}
-
-@app.get("/api/stats/recent-users")
-async def get_recent_users():
-    """최근 사용자 목록 조회 (최근 24시간 내 활동)"""
-    return logger_instance.get_recent_users()
-
-@app.get("/api/stats/user/{user_id}")
-async def get_user_detail(user_id: str):
-    """특정 사용자 상세 통계"""
-    if user_id not in logger_instance.user_stats:
-        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
-    
-    user_data = logger_instance.user_stats[user_id].copy()
-    
-    # Set을 list로 변환 (JSON 직렬화)
-    if isinstance(user_data["ip_addresses"], set):
-        user_data["ip_addresses"] = list(user_data["ip_addresses"])
-    if isinstance(user_data["user_agents"], set):
-        user_data["user_agents"] = list(user_data["user_agents"])
-    if isinstance(user_data["unique_days"], set):
-        user_data["unique_days"] = list(user_data["unique_days"])
-    
-    return user_data
-
-class SetUsernameRequest(BaseModel):
-    username: str
-
-@app.get("/api/get-system-username")
-async def get_system_username(http_request: Request):
-    """클라이언트 정보 제공 (자동 계정 추출 불가능)"""
-    try:
-        # 현재 사용자 ID 생성
-        client_ip = logger_instance.get_client_ip(http_request)
-        user_agent = http_request.headers.get("user-agent", "Unknown")
-        user_id = logger_instance.generate_user_id(client_ip, user_agent)
-        
-        # 웹 브라우저에서는 클라이언트 시스템 계정을 직접 가져올 수 없음
-        # 사용자가 직접 입력해야 함
-        
-        return {
-            "user_id": user_id,
-            "system_username": "",  # 자동 추출 불가
-            "hostname": "",         # 자동 추출 불가
-            "ip": client_ip,
-            "message": "클라이언트 시스템 정보 자동 추출 불가능 - 수동 입력 필요"
-        }
-    except Exception as e:
-        logger.error(f"클라이언트 정보 제공 실패: {e}")
-        return {"user_id": "", "system_username": "", "hostname": "", "ip": "", "message": "오류 발생"}
-
-@app.post("/api/set-username")
-async def set_username(request: SetUsernameRequest, http_request: Request):
-    """사용자 이름 설정"""
-    try:
-        # 현재 사용자 ID 생성
-        client_ip = logger_instance.get_client_ip(http_request)
-        user_agent = http_request.headers.get("user-agent", "Unknown")
-        user_id = logger_instance.generate_user_id(client_ip, user_agent)
-        
-        # 사용자 이름 설정
-        logger_instance.set_user_display_name(user_id, request.username)
-        
-        
-        return {"success": True, "user_id": user_id, "username": request.username}
-    except Exception as e:
-        logger.error(f"사용자 이름 설정 실패: {e}")
-        raise HTTPException(status_code=500, detail="사용자 이름 설정에 실패했습니다")
 
 # ========== 기타 ==========
 app.mount("/js", StaticFiles(directory="js"), name="js")
