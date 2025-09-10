@@ -37,42 +37,13 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
-# 사용자 이름 매핑을 위한 전역 변수
-USER_IP_MAPPING = {}
 
-# 사용자별 고유 색상 배정
-USER_COLORS = {
-    'hgchoi@choi': '\033[95m',      # 밝은 마젠타
-    'admin@server': '\033[96m',     # 밝은 청록
-    'guest@local': '\033[93m',      # 밝은 노랑
-    'user@host': '\033[94m',        # 밝은 파랑
-    'test@demo': '\033[91m',        # 밝은 빨강
-}
-
-def get_user_color(username):
-    """사용자별 고유 색상 반환"""
-    if username in USER_COLORS:
-        return USER_COLORS[username]
-    
-    # 해시 기반 색상 생성 (일관된 색상)
-    import hashlib
-    hash_value = int(hashlib.md5(username.encode()).hexdigest()[:6], 16)
-    colors = ['\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m']
-    return colors[hash_value % len(colors)]
 
 # uvicorn 로그에 사용자 이름과 색상을 적용하는 포맷터
 class UserNameLogFormatter(logging.Formatter):
     def format(self, record):
         message = super().format(record)
         
-        # IP:포트를 사용자명으로 교체
-        for ip, user_name in USER_IP_MAPPING.items():
-            if ip in message and user_name:
-                import re
-                # IP:포트 패턴을 사용자명으로 완전 교체
-                pattern = rf'\b{re.escape(ip)}:\d+\b'
-                replacement = f'\033[92m{user_name}\033[0m'  # 초록색 사용자명
-                message = re.sub(pattern, replacement, message)
         
         # INFO 레벨에 색상 적용 (밝은 파란색)
         message = re.sub(r'\bINFO\b', '\033[94mINFO\033[0m', message)
@@ -102,14 +73,6 @@ class UserNameLogFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             message = re.sub(pattern, replacement, message)
         
-        # 사용자명과 IP를 함께 표시
-        for ip, user_name in USER_IP_MAPPING.items():
-            if ip in message and user_name:
-                # IP:포트를 사용자명(IP:포트) 형태로 교체
-                pattern = rf'\b{re.escape(ip)}:(\d+)\b'
-                user_color = get_user_color(user_name)
-                replacement = f'{user_color}{user_name}\033[0m(\033[90m{ip}:\\1\033[0m)'  # 사용자명(IP:포트)
-                message = re.sub(pattern, replacement, message)
         
         return message
 
@@ -141,23 +104,9 @@ class ColoredFormatter(logging.Formatter):
         # HTTP 메서드와 상태 코드에 색상 추가
         formatted = self._colorize_http_content(formatted)
         
-        # IP 주소를 사용자 이름으로 교체
-        formatted = self._replace_ip_with_username(formatted)
         
         return formatted
     
-    def _replace_ip_with_username(self, text):
-        """IP:포트를 사용자명으로 교체"""
-        import re
-        
-        for ip, user_name in USER_IP_MAPPING.items():
-            if ip in text and user_name:
-                # IP:포트 패턴을 사용자명으로 완전 교체 (포트 제거)
-                pattern = rf'\b{re.escape(ip)}:\d+\b'
-                replacement = f'{user_name}'
-                text = re.sub(pattern, replacement, text)
-        
-        return text
     
     def _colorize_http_content(self, text):
         """HTTP 메서드와 상태 코드에 색상 적용"""
@@ -192,12 +141,6 @@ class ColoredFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             text = re.sub(pattern, replacement, text)
         
-        # 사용자 이름 색상 적용
-        for ip, user_name in USER_IP_MAPPING.items():
-            if user_name and user_name in text:
-                # 사용자명을 밝은 초록색으로
-                colored_user = f'\033[92m{user_name}\033[0m'
-                text = text.replace(user_name, colored_user)
         
         return text
 
@@ -379,17 +322,6 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         if should_log:
             logger_instance.update_stats(user_id, client_ip, endpoint, user_agent)
             
-            # 새 사용자는 사용자 등록 모달에서 직접 입력받도록 함
-            # 자동 시스템 계정 추출 제거 (서버 계정만 가져오는 문제)
-            
-            # IP-사용자 매핑 업데이트
-            current_display_name = logger_instance.user_stats.get(user_id, {}).get("display_name", "")
-            if current_display_name:
-                # 사용자 설정 이름이 있으면 사용
-                USER_IP_MAPPING[client_ip] = current_display_name
-            else:
-                # 이름이 없으면 IP 주소 사용
-                USER_IP_MAPPING[client_ip] = client_ip
             
             logger_instance.log_access(request, user_id, endpoint)
         
@@ -627,7 +559,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     key = str(target)
     cached = None
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
+    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -1484,8 +1416,6 @@ async def set_username(request: SetUsernameRequest, http_request: Request):
         # 사용자 이름 설정
         logger_instance.set_user_display_name(user_id, request.username)
         
-        # IP-사용자 매핑 업데이트 (uvicorn 로그용)
-        USER_IP_MAPPING[client_ip] = request.username
         
         return {"success": True, "user_id": user_id, "username": request.username}
     except Exception as e:
