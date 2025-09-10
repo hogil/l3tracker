@@ -142,7 +142,7 @@ class AccessLogger:
         }
         type_color = type_colors.get(log_type_name, '\033[97m')
         
-        # 완벽한 컬럼 정렬 - 고정 너비
+        # 완벽한 테이블 정렬 - 모든 컬럼 고정 너비
         log_type = f"{log_type_name:<3}"     # 3자리 (API, PAGE, FILE 등)
         timestamp_col = f"{timestamp:<19}"   # 19자리 (YYYY-MM-DD HH:MM:SS)
         ip_col = f"{ip:<15}"                # 15자리
@@ -183,11 +183,23 @@ class AccessLogger:
         # 추가 정보가 있으면 표시
         extra_part = f" {extra_info}" if extra_info else ""
         
-        # 컴팩트한 테이블 형식 로그
+        # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 보정
+        # 색상 코드 길이를 고려한 정렬
+        type_with_color = f"{type_color}{log_type}\033[0m"
+        ip_with_color = f"\033[90m{ip_col}\033[0m"
+        method_with_color = f"{method_color}{method_col}\033[0m"
+        status_with_color = f"{status_color}{status_col}\033[0m"
+        
+        # 고정 너비로 정렬 (색상 코드 길이 보정)
+        type_padded = f"{type_with_color:<12}"  # 색상코드 포함 12자리
+        ip_padded = f"{ip_with_color:<20}"      # 색상코드 포함 20자리  
+        method_padded = f"{method_with_color:<9}"  # 색상코드 포함 9자리
+        status_padded = f"{status_with_color:>8}"  # 색상코드 포함 8자리 (우측정렬)
+        
         message = (
-            f"{type_color}{log_type}\033[0m {timestamp_col} "
-            f"\033[90m{ip_col}\033[0m {method_color}{method_col}\033[0m "
-            f"{endpoint_col} {status_color}{status_col}\033[0m{extra_part}"
+            f"{type_padded} {timestamp_col} "
+            f"{ip_padded} {method_padded} "
+            f"{endpoint_col} {status_padded}{extra_part}"
         )
         
         # 콘솔에 테이블 형식으로 출력
