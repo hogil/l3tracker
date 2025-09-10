@@ -76,11 +76,11 @@ class AccessLogger:
         if user_id in self.user_stats:
             display_name = self.user_stats[user_id].get("display_name", "")
         
-        # 콘솔 및 파일 로그
+        # 콘솔 및 파일 로그 (색상 적용)
         if display_name:
-            log_message = f"🔗 {client_ip} | {display_name} | {method} {endpoint}"
+            log_message = f"🔗 \033[96m{client_ip}\033[0m | \033[92m{display_name}\033[0m | \033[93m{method}\033[0m \033[94m{endpoint}\033[0m"
         else:
-            log_message = f"🔗 {client_ip} | Anonymous | {method} {endpoint}"
+            log_message = f"🔗 \033[96m{client_ip}\033[0m | \033[90mAnonymous\033[0m | \033[93m{method}\033[0m \033[94m{endpoint}\033[0m"
         access_logger.info(log_message)
     
     def get_client_ip(self, request: Request) -> str:

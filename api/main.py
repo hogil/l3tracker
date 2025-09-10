@@ -135,6 +135,13 @@ class ColoredFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             text = re.sub(pattern, replacement, text)
         
+        # 사용자 이름 색상 적용
+        for ip, user_name in USER_IP_MAPPING.items():
+            if user_name and user_name in text:
+                # 사용자명을 밝은 초록색으로
+                colored_user = f'\033[92m{user_name}\033[0m'
+                text = text.replace(user_name, colored_user)
+        
         return text
 
 # uvicorn 로깅 설정 (옵션 없이도 시간 표시 + 색상)
