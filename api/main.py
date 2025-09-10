@@ -218,8 +218,12 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             temp_logger = AccessLogger()
             log_type = temp_logger._determine_log_type(endpoint, request.method)
             
+            # stats 엔드포인트는 로그 완전 제한 (자동 폴링 방지)
+            if endpoint.startswith('/api/stats/'):
+                should_log = False  # stats는 자동 폴링이므로 로그 완전 제한
+                return response  # stats는 로그 없이 바로 반환
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
-            if log_type not in ['ACTION', 'IMAGE']:
+            elif log_type not in ['ACTION', 'IMAGE']:
                 should_log = logger_instance.should_log_frequent_api(client_ip, endpoint)
         
         # IP 기반 간단한 접속 로깅 (응답 후 처리)

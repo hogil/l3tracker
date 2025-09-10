@@ -80,13 +80,31 @@ class AccessLogger:
         
         query_params = dict(request.query_params)
         
-        # 이미지/썸네일 요청에서 파일명 추출
+        # 이미지/썸네일 요청에서 경로 정보 추출
         if endpoint.startswith('/api/image') or endpoint.startswith('/api/thumbnail'):
             path = query_params.get('path', '')
             if path:
-                # 파일명만 추출 (경로 제거)
-                filename = path.split('/')[-1] if '/' in path else path
-                return f"[{filename}]"
+                # 경로 정보 표시 - 최대 4개 폴더까지 표시
+                path_parts = path.split('/')
+                if len(path_parts) >= 5:
+                    # 5개 이상: 상위3개폴더/파일명
+                    path_display = f"{path_parts[-4]}/{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                elif len(path_parts) == 4:
+                    # 4개: 상위2개폴더/파일명
+                    path_display = f"{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                elif len(path_parts) == 3:
+                    # 3개: 상위폴더/파일명
+                    path_display = f"{path_parts[-2]}/{path_parts[-1]}"
+                elif len(path_parts) == 2:
+                    # 2개: 폴더/파일명
+                    path_display = f"{path_parts[-2]}/{path_parts[-1]}"
+                elif len(path_parts) == 1:
+                    # 1개: 파일명만
+                    path_display = path_parts[-1]
+                else:
+                    path_display = path
+                
+                return f"[{path_display}]"
         
         # 클래스 관련 요청
         elif '/api/classes/' in endpoint:
@@ -152,41 +170,42 @@ class AccessLogger:
         endpoint_display = endpoint
         if endpoint.startswith('/api/'):
             endpoint_display = endpoint[5:]  # /api/ 제거
-            if '?' in endpoint_display:
-                base_endpoint = endpoint_display.split('?')[0]
-                
-                # path 파라미터에서 파일 정보 추출
-                if 'path=' in endpoint:
-                    import urllib.parse
-                    try:
-                        path_param = endpoint.split('path=')[1].split('&')[0]
-                        decoded_path = urllib.parse.unquote(path_param)
-                        # 경로 정보 표시 - 최대 4개 폴더까지 표시
-                        path_parts = decoded_path.split('/')
-                        if len(path_parts) >= 5:
-                            # 5개 이상: 상위3개폴더/파일명
-                            endpoint_display = f"{base_endpoint}→{path_parts[-4]}/{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
-                        elif len(path_parts) == 4:
-                            # 4개: 상위2개폴더/파일명
-                            endpoint_display = f"{base_endpoint}→{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
-                        elif len(path_parts) == 3:
-                            # 3개: 상위폴더/파일명
-                            endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
-                        elif len(path_parts) == 2:
-                            # 2개: 폴더/파일명
-                            endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
-                        elif len(path_parts) == 1:
-                            # 1개: 파일명만
-                            endpoint_display = f"{base_endpoint}→{path_parts[-1]}"
-                    except:
-                        endpoint_display = base_endpoint
-                else:
-                    endpoint_display = base_endpoint
-            else:
-                # /api/로 시작하지만 ?가 없는 경우 (예: /api/image)
-                endpoint_display = endpoint_display
+            
+            # path 파라미터에서 파일 정보 추출 (query string이 있든 없든)
+            if 'path=' in endpoint:
+                import urllib.parse
+                try:
+                    path_param = endpoint.split('path=')[1].split('&')[0]
+                    decoded_path = urllib.parse.unquote(path_param)
+                    
+                    # base_endpoint 추출
+                    if '?' in endpoint_display:
+                        base_endpoint = endpoint_display.split('?')[0]
+                    else:
+                        base_endpoint = endpoint_display
+                    
+                    # 경로 정보 표시 - 최대 4개 폴더까지 표시
+                    path_parts = decoded_path.split('/')
+                    if len(path_parts) >= 5:
+                        # 5개 이상: 상위3개폴더/파일명
+                        endpoint_display = f"{base_endpoint}→{path_parts[-4]}/{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                    elif len(path_parts) == 4:
+                        # 4개: 상위2개폴더/파일명
+                        endpoint_display = f"{base_endpoint}→{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                    elif len(path_parts) == 3:
+                        # 3개: 상위폴더/파일명
+                        endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
+                    elif len(path_parts) == 2:
+                        # 2개: 폴더/파일명
+                        endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
+                    elif len(path_parts) == 1:
+                        # 1개: 파일명만
+                        endpoint_display = f"{base_endpoint}→{path_parts[-1]}"
+                except:
+                    # path 파라미터 추출 실패시 원본 유지
+                    pass
         
-        endpoint_col = f"{endpoint_display:<50}"  # 50자리로 증가 (더 긴 경로 표시용)
+        endpoint_col = f"{endpoint_display:<25}"  # 25자리로 조정
         status_col = f"{status_code:>3}"         # 3자리 (우측 정렬)
         
         # 추가 정보가 있으면 표시
