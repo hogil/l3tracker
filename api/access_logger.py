@@ -22,13 +22,13 @@ STATS_LOG_FILE = LOG_DIR / "user_stats.json"
 access_logger = logging.getLogger("access")
 access_logger.setLevel(logging.INFO)
 
-# 파일 핸들러 설정
+# 파일 핸들러 설정 (시간 제거)
 handler = logging.FileHandler(ACCESS_LOG_FILE, encoding='utf-8')
-formatter = logging.Formatter('%(asctime)s - %(message)s')
+formatter = logging.Formatter('%(message)s')  # 메시지만 출력
 handler.setFormatter(formatter)
 access_logger.addHandler(handler)
 
-# 콘솔 핸들러도 추가
+# 콘솔 핸들러도 추가 (시간 제거)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 access_logger.addHandler(console_handler)
