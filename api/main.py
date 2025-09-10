@@ -39,8 +39,8 @@ import logging.config
 
 
 
-# uvicorn 로그에 사용자 이름과 색상을 적용하는 포맷터
-class UserNameLogFormatter(logging.Formatter):
+# HTTP 로그 색상 포맷터
+class HTTPLogFormatter(logging.Formatter):
     def format(self, record):
         message = super().format(record)
         
@@ -48,7 +48,7 @@ class UserNameLogFormatter(logging.Formatter):
         # INFO 레벨에 색상 적용 (밝은 파란색)
         message = re.sub(r'\bINFO\b', '\033[94mINFO\033[0m', message)
         
-        # HTTP 메서드에 다양한 예쁜 색상 적용
+        # HTTP 메서드에 색상 적용
         http_methods = {
             'GET': '\033[96m',     # 밝은 청록색 (시원함)
             'POST': '\033[95m',    # 밝은 마젠타색 (활동적)
@@ -1377,13 +1377,13 @@ async def startup_event():
     logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
     logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
     
-    # uvicorn 로거에 커스텀 포맷터 적용
+    # uvicorn 로거에 HTTP 로그 포맷터 적용
     uvicorn_logger = logging.getLogger("uvicorn.access")
     if uvicorn_logger.handlers:
         for handler in uvicorn_logger.handlers:
             original_formatter = handler.formatter
             if original_formatter:
-                custom_formatter = UserNameLogFormatter(original_formatter._fmt)
+                custom_formatter = HTTPLogFormatter(original_formatter._fmt)
                 handler.setFormatter(custom_formatter)
     
     _classification_dir().mkdir(parents=True, exist_ok=True)
