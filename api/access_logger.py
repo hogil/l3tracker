@@ -68,6 +68,40 @@ class AccessLogger:
         colors = ['\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m']
         return colors[hash_value % len(colors)]
     
+    def get_recent_users(self, hours: int = 24) -> Dict[str, Any]:
+        """최근 N시간 내 활동한 사용자 목록"""
+        from datetime import datetime, timedelta
+        
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        recent_users = []
+        
+        for user_id, user_data in self.user_stats.items():
+            # 마지막 접속 시간 확인
+            if "last_access" in user_data:
+                try:
+                    last_access = datetime.fromisoformat(user_data["last_access"])
+                    if last_access > cutoff_time:
+                        user_info = {
+                            "user_id": user_id,
+                            "display_name": user_data.get("display_name", ""),
+                            "last_access": user_data["last_access"],
+                            "total_requests": user_data.get("total_requests", 0),
+                            "ip_addresses": list(user_data.get("ip_addresses", [])) if isinstance(user_data.get("ip_addresses"), (set, list)) else []
+                        }
+                        user_info["primary_ip"] = user_info["ip_addresses"][0] if user_info["ip_addresses"] else "unknown"
+                        recent_users.append(user_info)
+                except (ValueError, TypeError):
+                    continue
+        
+        # 마지막 접속 시간 기준으로 정렬 (최신순)
+        recent_users.sort(key=lambda x: x.get("last_access", ""), reverse=True)
+        
+        return {
+            "recent_users": recent_users[:10],  # 최대 10명
+            "total_recent": len(recent_users),
+            "hours": hours
+        }
+    
     def load_stats(self) -> Dict[str, Dict[str, Any]]:
         """사용자 통계 로드"""
         try:
@@ -152,6 +186,7 @@ class AccessLogger:
         
         # 기본 정보 업데이트
         user_data["last_seen"] = today
+        user_data["last_access"] = datetime.now().isoformat()  # 최근 접속 시간 추가
         
         # Set이 list로 변환된 경우 다시 set으로 변환
         if isinstance(user_data["ip_addresses"], list):

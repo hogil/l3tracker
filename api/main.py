@@ -391,14 +391,15 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                     if system_username and system_username != "Unknown":
                         display_name = f"{system_username}@{hostname}"
                         logger_instance.set_user_display_name(user_id, display_name)
+                        # IP-사용자 매핑 업데이트 (uvicorn 로그용)
+                        USER_IP_MAPPING[client_ip] = display_name
                 except Exception:
                     pass
             
-            # 모든 사용자를 hgchoi@choi로 강제 설정
-            logger_instance.set_user_display_name(user_id, "hgchoi@choi")
-            
-            # IP-사용자 매핑 업데이트 (uvicorn 로그용)
-            USER_IP_MAPPING[client_ip] = "hgchoi@choi"
+            # IP-사용자 매핑 업데이트 (기존 display_name이 있는 경우)
+            current_display_name = logger_instance.user_stats.get(user_id, {}).get("display_name", "")
+            if current_display_name:
+                USER_IP_MAPPING[client_ip] = current_display_name
             
             logger_instance.log_access(request, user_id, endpoint)
         
@@ -634,8 +635,11 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:    cached = DIRLIST_CACHE.get(key)
-    if cached is not None:        return cached
+    cached = None
+    if should_cache:
+        cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:
@@ -1429,6 +1433,11 @@ async def get_user_stats():
     stats.sort(key=lambda x: x.get("total_requests", 0), reverse=True)
     return {"users": stats, "total_users": len(stats)}
 
+@app.get("/api/stats/recent-users")
+async def get_recent_users():
+    """최근 사용자 목록 조회 (최근 24시간 내 활동)"""
+    return logger_instance.get_recent_users()
+
 @app.get("/api/stats/user/{user_id}")
 async def get_user_detail(user_id: str):
     """특정 사용자 상세 통계"""
@@ -1493,6 +1502,9 @@ async def set_username(request: SetUsernameRequest, http_request: Request):
         
         # 사용자 이름 설정
         logger_instance.set_user_display_name(user_id, request.username)
+        
+        # IP-사용자 매핑 업데이트 (uvicorn 로그용)
+        USER_IP_MAPPING[client_ip] = request.username
         
         return {"success": True, "user_id": user_id, "username": request.username}
     except Exception as e:

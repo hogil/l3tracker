@@ -7,7 +7,145 @@
  * - Image panning and zooming
  * - A responsive minimap
  * - Sidebar resizing
+ * - Dynamic user registration
  */
+
+// User Management
+class UserManager {
+    constructor() {
+        this.userId = null;
+        this.displayName = null;
+        this.init();
+    }
+    
+    async init() {
+        // 브라우저 저장소에서 사용자 정보 확인
+        const storedUser = localStorage.getItem('l3tracker_user');
+        if (storedUser) {
+            try {
+                const userInfo = JSON.parse(storedUser);
+                this.userId = userInfo.userId;
+                this.displayName = userInfo.displayName;
+                await this.validateUser();
+                return;
+            } catch (e) {
+                console.warn('저장된 사용자 정보 파싱 실패:', e);
+            }
+        }
+        
+        // 신규 사용자 - 시스템 정보 자동 추출 시도
+        await this.registerUser();
+    }
+    
+    async registerUser() {
+        try {
+            // 시스템 사용자 정보 자동 추출
+            const response = await fetch('/api/get-system-username');
+            if (response.ok) {
+                const systemInfo = await response.json();
+                if (systemInfo.system_username && systemInfo.hostname) {
+                    const autoName = `${systemInfo.system_username}@${systemInfo.hostname}`;
+                    await this.setUserName(autoName);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('시스템 정보 자동 추출 실패:', e);
+        }
+        
+        // 자동 추출 실패시 수동 등록 모달 표시
+        this.showRegistrationModal();
+    }
+    
+    showRegistrationModal() {
+        const modal = document.getElementById('user-registration-modal');
+        if (!modal) {
+            console.error('사용자 등록 모달을 찾을 수 없습니다');
+            return;
+        }
+        
+        modal.style.display = 'block';
+        
+        // 자동으로 기본값 채워보기
+        try {
+            const usernameInput = document.getElementById('username-input');
+            const hostnameInput = document.getElementById('hostname-input');
+            
+            // 브라우저 정보에서 추측해서 채우기
+            usernameInput.value = 'user';
+            hostnameInput.value = 'desktop';
+        } catch (e) {
+            console.warn('기본값 설정 실패:', e);
+        }
+        
+        // 등록 버튼 이벤트
+        document.getElementById('user-register-btn').onclick = () => {
+            this.handleRegistration();
+        };
+        
+        // Enter 키로 등록
+        document.getElementById('username-input').onkeyup = 
+        document.getElementById('hostname-input').onkeyup = (e) => {
+            if (e.key === 'Enter') {
+                this.handleRegistration();
+            }
+        };
+    }
+    
+    async handleRegistration() {
+        const username = document.getElementById('username-input').value.trim();
+        const hostname = document.getElementById('hostname-input').value.trim();
+        
+        if (!username || !hostname) {
+            alert('사용자명과 PC 이름을 모두 입력해 주세요.');
+            return;
+        }
+        
+        const displayName = `${username}@${hostname}`;
+        await this.setUserName(displayName);
+        
+        // 모달 닫기
+        document.getElementById('user-registration-modal').style.display = 'none';
+    }
+    
+    async setUserName(displayName) {
+        try {
+            const response = await fetch('/api/set-username', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: displayName })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.userId = result.user_id;
+                this.displayName = displayName;
+                
+                // 브라우저에 저장
+                localStorage.setItem('l3tracker_user', JSON.stringify({
+                    userId: this.userId,
+                    displayName: this.displayName
+                }));
+                
+                console.log(`사용자 등록 완료: ${displayName}`);
+            }
+        } catch (e) {
+            console.error('사용자 등록 실패:', e);
+        }
+    }
+    
+    async validateUser() {
+        // 서버에 현재 사용자가 여전히 유효한지 확인
+        try {
+            await fetch('/api/files'); // 간단한 API 호출로 사용자 상태 갱신
+        } catch (e) {
+            console.warn('사용자 유효성 검사 실패:', e);
+        }
+    }
+}
+
+// 전역 사용자 관리자 인스턴스
+const userManager = new UserManager();
 
 // Constants
 const DEFAULT_GRID_COLS = 3;
