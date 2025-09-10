@@ -48,6 +48,26 @@ class AccessLogger:
             self.user_stats[user_id]["display_name"] = display_name
             self.save_stats()
     
+    def get_user_color(self, username: str) -> str:
+        """사용자별 고유 색상 반환"""
+        # 사용자별 고정 색상
+        user_colors = {
+            'hgchoi@choi': '\033[95m',      # 밝은 마젠타
+            'admin@server': '\033[96m',     # 밝은 청록
+            'guest@local': '\033[93m',      # 밝은 노랑
+            'user@host': '\033[94m',        # 밝은 파랑
+            'test@demo': '\033[91m',        # 밝은 빨강
+        }
+        
+        if username in user_colors:
+            return user_colors[username]
+        
+        # 해시 기반 색상 생성 (일관된 색상)
+        import hashlib
+        hash_value = int(hashlib.md5(username.encode()).hexdigest()[:6], 16)
+        colors = ['\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m']
+        return colors[hash_value % len(colors)]
+    
     def load_stats(self) -> Dict[str, Dict[str, Any]]:
         """사용자 통계 로드"""
         try:
@@ -76,7 +96,7 @@ class AccessLogger:
         if user_id in self.user_stats:
             display_name = self.user_stats[user_id].get("display_name", "")
         
-        # 콘솔 및 파일 로그 (INFO 형식과 통일, 다양한 예쁜 색상)
+        # 콘솔 및 파일 로그 (INFO 형식과 통일, 사용자별 고유 색상)
         if display_name:
             # 메서드별 색상 구분
             method_colors = {
@@ -87,7 +107,10 @@ class AccessLogger:
             }
             method_color = method_colors.get(method, '\033[97m')  # 기본: 밝은 흰색
             
-            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[95m{display_name}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
+            # 사용자별 고유 색상 적용
+            user_color = self.get_user_color(display_name)
+            
+            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     {user_color}{display_name}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
         else:
             log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[90mAnonymous\033[0m - \"\033[96m{method}\033[0m {endpoint} HTTP/1.1\" \033[92m200\033[0m"
         access_logger.info(log_message)

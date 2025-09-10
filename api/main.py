@@ -40,6 +40,26 @@ import logging.config
 # 사용자 이름 매핑을 위한 전역 변수
 USER_IP_MAPPING = {}
 
+# 사용자별 고유 색상 배정
+USER_COLORS = {
+    'hgchoi@choi': '\033[95m',      # 밝은 마젠타
+    'admin@server': '\033[96m',     # 밝은 청록
+    'guest@local': '\033[93m',      # 밝은 노랑
+    'user@host': '\033[94m',        # 밝은 파랑
+    'test@demo': '\033[91m',        # 밝은 빨강
+}
+
+def get_user_color(username):
+    """사용자별 고유 색상 반환"""
+    if username in USER_COLORS:
+        return USER_COLORS[username]
+    
+    # 해시 기반 색상 생성 (일관된 색상)
+    import hashlib
+    hash_value = int(hashlib.md5(username.encode()).hexdigest()[:6], 16)
+    colors = ['\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m']
+    return colors[hash_value % len(colors)]
+
 # uvicorn 로그에 사용자 이름과 색상을 적용하는 포맷터
 class UserNameLogFormatter(logging.Formatter):
     def format(self, record):
@@ -82,12 +102,13 @@ class UserNameLogFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             message = re.sub(pattern, replacement, message)
         
-        # 사용자명에 특별한 색상 적용 (밝은 마젠타색 - 독특하게)
+        # 사용자명에 고유 색상 적용
         for ip, user_name in USER_IP_MAPPING.items():
             if ip in message and user_name:
-                # IP:포트를 사용자명으로 교체하고 밝은 마젠타색 적용
+                # IP:포트를 사용자명으로 교체하고 고유 색상 적용
                 pattern = rf'\b{re.escape(ip)}:\d+\b'
-                replacement = f'\033[95m{user_name}\033[0m'  # 밝은 마젠타색 사용자명
+                user_color = get_user_color(user_name)
+                replacement = f'{user_color}{user_name}\033[0m'
                 message = re.sub(pattern, replacement, message)
         
         return message
@@ -613,10 +634,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:
-        cached = DIRLIST_CACHE.get(key)
-        if cached is not None:
-            return cached
+    if should_cache:    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:        return cached
 
     items: List[Dict[str, str]] = []
     try:
