@@ -1249,6 +1249,7 @@ async def delete_classification(req: ClassifyDeleteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========== 기타 ==========
+app.mount("/js", StaticFiles(directory="js"), name="js")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 @app.get("/")
