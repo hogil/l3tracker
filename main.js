@@ -3053,6 +3053,7 @@ class WaferMapViewer {
             const blob = await fetch(`/api/image?path=${encodeURIComponent(path)}`).then(r => r.blob());
             this.currentImageBitmap = await createImageBitmap(blob);
             this.currentImage = this.currentImageBitmap;
+            this.currentImagePath = path; // 🎯 크게보기 모드용 현재 이미지 경로 설정
             this.resetView(false);
             this.dom.minimapContainer.style.display = 'block';
             this.dom.imageCanvas.style.display = 'block';

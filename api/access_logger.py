@@ -142,9 +142,9 @@ class AccessLogger:
         }
         type_color = type_colors.get(log_type_name, '\033[97m')
         
-        # 컴팩트한 컬럼 정렬
+        # 완벽한 컬럼 정렬 - 고정 너비
         log_type = f"{log_type_name:<3}"     # 3자리 (API, PAGE, FILE 등)
-        timestamp_col = timestamp            # 19자리 (YYYY-MM-DD HH:MM:SS)
+        timestamp_col = f"{timestamp:<19}"   # 19자리 (YYYY-MM-DD HH:MM:SS)
         ip_col = f"{ip:<15}"                # 15자리
         method_col = f"{method:<4}"          # 4자리 (GET, POST, PUT, DEL)
         
