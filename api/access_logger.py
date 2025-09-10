@@ -161,13 +161,19 @@ class AccessLogger:
                     try:
                         path_param = endpoint.split('path=')[1].split('&')[0]
                         decoded_path = urllib.parse.unquote(path_param)
-                        # 경로 정보 표시 - 더 자세한 경로
+                        # 경로 정보 표시 - 최대 4개 폴더까지 표시
                         path_parts = decoded_path.split('/')
-                        if len(path_parts) >= 3:
-                            # 3개 이상: 상위2개폴더/파일명
+                        if len(path_parts) >= 5:
+                            # 5개 이상: 상위3개폴더/파일명
+                            endpoint_display = f"{base_endpoint}→{path_parts[-4]}/{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                        elif len(path_parts) == 4:
+                            # 4개: 상위2개폴더/파일명
                             endpoint_display = f"{base_endpoint}→{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                        elif len(path_parts) == 3:
+                            # 3개: 상위폴더/파일명
+                            endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
                         elif len(path_parts) == 2:
-                            # 2개: 상위폴더/파일명
+                            # 2개: 폴더/파일명
                             endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
                         elif len(path_parts) == 1:
                             # 1개: 파일명만
@@ -177,7 +183,7 @@ class AccessLogger:
                 else:
                     endpoint_display = base_endpoint
         
-        endpoint_col = f"{endpoint_display:<40}"  # 40자리로 증가 (경로 표시용)
+        endpoint_col = f"{endpoint_display:<50}"  # 50자리로 증가 (더 긴 경로 표시용)
         status_col = f"{status_code:>3}"         # 3자리 (우측 정렬)
         
         # 추가 정보가 있으면 표시
@@ -190,16 +196,17 @@ class AccessLogger:
         method_with_color = f"{method_color}{method_col}\033[0m"
         status_with_color = f"{status_color}{status_col}\033[0m"
         
-        # 고정 너비로 정렬 (색상 코드 길이 보정)
+        # 고정 너비로 정렬 (색상 코드 길이 보정) + 여백 추가
         type_padded = f"{type_with_color:<12}"  # 색상코드 포함 12자리
         ip_padded = f"{ip_with_color:<20}"      # 색상코드 포함 20자리  
         method_padded = f"{method_with_color:<9}"  # 색상코드 포함 9자리
         status_padded = f"{status_with_color:>8}"  # 색상코드 포함 8자리 (우측정렬)
         
+        # 🎯 여백 추가로 가독성 향상
         message = (
-            f"{type_padded} {timestamp_col} "
-            f"{ip_padded} {method_padded} "
-            f"{endpoint_col} {status_padded}{extra_part}"
+            f"{type_padded}  {timestamp_col}  "  # 타입-시간 간 여백 2칸
+            f"{ip_padded}  {method_padded}  "    # IP-메서드 간 여백 2칸
+            f"{endpoint_col}  {status_padded}{extra_part}"  # 엔드포인트-상태 간 여백 2칸
         )
         
         # 콘솔에 테이블 형식으로 출력
