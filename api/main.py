@@ -40,19 +40,47 @@ import logging.config
 # 사용자 이름 매핑을 위한 전역 변수
 USER_IP_MAPPING = {}
 
-# uvicorn 로그에 사용자 이름을 포함하는 포맷터
+# uvicorn 로그에 사용자 이름과 색상을 적용하는 포맷터
 class UserNameLogFormatter(logging.Formatter):
     def format(self, record):
         message = super().format(record)
         
-        # IP 주소를 사용자 이름으로 교체
+        # IP:포트를 사용자명으로 교체
         for ip, user_name in USER_IP_MAPPING.items():
             if ip in message and user_name:
                 import re
-                # IP:포트 패턴을 사용자명으로 완전 교체 (포트 제거)
+                # IP:포트 패턴을 사용자명으로 완전 교체
                 pattern = rf'\b{re.escape(ip)}:\d+\b'
-                replacement = f'{user_name}'
+                replacement = f'\033[92m{user_name}\033[0m'  # 초록색 사용자명
                 message = re.sub(pattern, replacement, message)
+        
+        # INFO 레벨에 색상 적용
+        message = re.sub(r'\bINFO\b', '\033[32mINFO\033[0m', message)
+        
+        # HTTP 메서드에 색상 적용
+        http_methods = {
+            'GET': '\033[96m',     # 밝은 청록색
+            'POST': '\033[93m',    # 밝은 노란색
+            'PUT': '\033[94m',     # 밝은 파란색
+            'DELETE': '\033[91m',  # 밝은 빨간색
+        }
+        
+        for method, color in http_methods.items():
+            pattern = f'"{method} '
+            if pattern in message:
+                colored_method = f'"{color}{method}\033[0m '
+                message = message.replace(pattern, colored_method)
+        
+        # HTTP 상태 코드에 색상 적용
+        status_patterns = [
+            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 초록
+            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 파랑
+            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 노랑
+            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 빨강
+        ]
+        
+        for pattern, replacement in status_patterns:
+            message = re.sub(pattern, replacement, message)
         
         return message
 
