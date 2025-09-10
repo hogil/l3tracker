@@ -276,7 +276,22 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         skip_paths = ["/favicon.ico", "/static/", "/js/"]
         should_log = not any(endpoint.startswith(path) for path in skip_paths)
         
+        # 사용자 통계 먼저 업데이트 (display_name 확보용)
         if should_log:
+            logger_instance.update_stats(user_id, client_ip, endpoint, user_agent)
+            
+            # 새 사용자이고 display_name이 없으면 시스템 사용자 이름 설정 시도
+            if (user_id in logger_instance.user_stats and 
+                not logger_instance.user_stats[user_id].get("display_name", "") and
+                "Mozilla" in user_agent):  # 브라우저 접속인 경우만
+                try:
+                    import getpass
+                    system_username = getpass.getuser()
+                    if system_username and system_username != "Unknown":
+                        logger_instance.set_user_display_name(user_id, system_username)
+                except Exception:
+                    pass
+            
             logger_instance.log_access(request, user_id, endpoint)
         
         # 요청 처리

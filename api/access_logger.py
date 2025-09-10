@@ -67,9 +67,8 @@ class AccessLogger:
             print(f"통계 저장 실패: {e}")
     
     def log_access(self, request: Request, user_id: str, endpoint: str):
-        """접속 로그 기록"""
+        """접속 로그 기록 (통계 업데이트는 미들웨어에서 이미 처리됨)"""
         client_ip = self.get_client_ip(request)
-        user_agent = request.headers.get("user-agent", "Unknown")
         method = request.method
         
         # 표시 이름 가져오기
@@ -79,13 +78,10 @@ class AccessLogger:
         
         # 콘솔 및 파일 로그
         if display_name:
-            log_message = f"🔗 {client_ip} | {display_name} (ID:{user_id}) | {method} {endpoint}"
+            log_message = f"🔗 {client_ip} | {display_name} (ID:{user_id[:8]}) | {method} {endpoint}"
         else:
-            log_message = f"🔗 {client_ip} | ID:{user_id} | {method} {endpoint}"
+            log_message = f"🔗 {client_ip} | ID:{user_id[:8]} | {method} {endpoint}"
         access_logger.info(log_message)
-        
-        # 통계 업데이트
-        self.update_stats(user_id, client_ip, endpoint, user_agent)
     
     def get_client_ip(self, request: Request) -> str:
         """실제 클라이언트 IP 추출 (프록시 고려)"""

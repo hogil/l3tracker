@@ -221,9 +221,11 @@ class WaferMapViewer {
     constructor() {
         this.cacheDom();
         this.initState();
-        this.setupUserName();
         this.bindEvents();
         this.init();
+        
+        // 사용자 이름 설정은 DOM 로드 후 비동기로 실행
+        setTimeout(() => this.setupUserName(), 100);
         // 디바운싱된 showGrid
         this._showGridScheduled = false;
         // 썸네일 매니저
