@@ -49,9 +49,9 @@ class UserNameLogFormatter(logging.Formatter):
         for ip, user_name in USER_IP_MAPPING.items():
             if ip in message and user_name:
                 import re
-                # IP:포트 패턴을 IP (사용자명):포트로 변경
-                pattern = rf'\b{re.escape(ip)}:(\d+)\b'
-                replacement = f'{ip} ({user_name}):\\1'
+                # IP:포트 패턴을 사용자명으로 완전 교체 (포트 제거)
+                pattern = rf'\b{re.escape(ip)}:\d+\b'
+                replacement = f'{user_name}'
                 message = re.sub(pattern, replacement, message)
         
         return message
@@ -84,7 +84,23 @@ class ColoredFormatter(logging.Formatter):
         # HTTP 메서드와 상태 코드에 색상 추가
         formatted = self._colorize_http_content(formatted)
         
+        # IP 주소를 사용자 이름으로 교체
+        formatted = self._replace_ip_with_username(formatted)
+        
         return formatted
+    
+    def _replace_ip_with_username(self, text):
+        """IP:포트를 사용자명으로 교체"""
+        import re
+        
+        for ip, user_name in USER_IP_MAPPING.items():
+            if ip in text and user_name:
+                # IP:포트 패턴을 사용자명으로 완전 교체 (포트 제거)
+                pattern = rf'\b{re.escape(ip)}:\d+\b'
+                replacement = f'{user_name}'
+                text = re.sub(pattern, replacement, text)
+        
+        return text
     
     def _colorize_http_content(self, text):
         """HTTP 메서드와 상태 코드에 색상 적용"""
@@ -554,10 +570,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:
-    cached = DIRLIST_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if should_cache:    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:        return cached
 
     items: List[Dict[str, str]] = []
     try:
