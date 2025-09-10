@@ -220,6 +220,7 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             
             # stats 엔드포인트는 로그 완전 제한 (자동 폴링 방지)
             if endpoint.startswith('/api/stats/'):
+                print(f"DEBUG: stats 엔드포인트 감지됨: {endpoint}")
                 should_log = False  # stats는 자동 폴링이므로 로그 완전 제한
                 return response  # stats는 로그 없이 바로 반환
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
@@ -474,7 +475,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
                 if name in SKIP_DIRS:
                     continue
                 typ = "directory" if entry.is_dir(follow_symlinks=False) else "file"
-                items.append({"name": name, "type": typ})
+                # 전체 경로 정보 포함
+                full_path = str(entry.path).replace('\\', '/')
+                items.append({"name": name, "type": typ, "path": full_path})
 
         # 디렉터리와 파일을 분리하여 각각 내림차순 정렬
         directories = [x for x in items if x["type"] == "directory"]
@@ -1435,6 +1438,6 @@ if __name__ == "__main__":
         port=config.DEFAULT_PORT,
         reload=config.DEFAULT_RELOAD,
         workers=config.DEFAULT_WORKERS,
-        log_level="warning",  # 깔끔한 로깅을 위해 warning 레벨로 설정
+        log_level="info",     # 서버 시작 로그 표시
         access_log=False,     # uvicorn access 로그 완전 비활성화
     )

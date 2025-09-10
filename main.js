@@ -1766,7 +1766,8 @@ class WaferMapViewer {
         nodes = Array.isArray(nodes) ? nodes : [];
         let html = '<ul>';
         for (const node of nodes) {
-            const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name;
+            // path 정보가 있으면 사용, 없으면 기존 방식 사용
+            const fullPath = node.path || (parentPath ? `${parentPath}/${node.name}` : node.name);
             if (node.type === 'directory') {
                 html += `<li><details><summary data-path="${fullPath}" class="folder">📁 ${node.name}</summary><div class="folder-content" style="padding-left: 1rem;"></div></details></li>`;
             } else if (node.type === 'file') {
