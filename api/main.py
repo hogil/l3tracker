@@ -221,8 +221,8 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             # stats 엔드포인트는 로그 완전 제한 (자동 폴링 방지)
             if endpoint.startswith('/api/stats/'):
                 print(f"DEBUG: stats 엔드포인트 감지됨: {endpoint}")
-                should_log = False  # stats는 자동 폴링이므로 로그 완전 제한
-                return response  # stats는 로그 없이 바로 반환
+                # stats는 로그 없이 바로 반환
+                return response
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
             elif log_type not in ['ACTION', 'IMAGE']:
                 should_log = logger_instance.should_log_frequent_api(client_ip, endpoint)
@@ -1439,5 +1439,5 @@ if __name__ == "__main__":
         reload=config.DEFAULT_RELOAD,
         workers=config.DEFAULT_WORKERS,
         log_level="info",     # 서버 시작 로그 표시
-        access_log=False,     # uvicorn access 로그 완전 비활성화
+        access_log=True,      # uvicorn access 로그 활성화 (서버 시작 메시지용)
     )
