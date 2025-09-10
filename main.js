@@ -3446,6 +3446,16 @@ class WaferMapViewer {
             btn.onclick = async (e) => {
                 const isCtrl = e.ctrlKey || e.metaKey;
                 const isShift = e.shiftKey;
+                
+                // 🔍 디버깅 로그 추가
+                console.log('🔍 클래스 버튼 클릭 디버깅:', {
+                    className: cls,
+                    currentImagePath: this.currentImagePath,
+                    gridMode: this.gridMode,
+                    selectedImagePath: this.selectedImagePath,
+                    gridSelectedIdxs: this.gridSelectedIdxs
+                });
+                
                 if (!isCtrl && !isShift) {
                     // 🎯 크게보기 모드: 현재 표시 중인 이미지 바로 라벨링
                     if (this.currentImagePath && !this.gridMode) {
