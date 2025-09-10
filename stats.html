@@ -331,18 +331,18 @@
         </div>
         
         <!-- 상단 섹션: 오늘 요약 + 사용자 목록 -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; align-items: start;">
-            <div class="stats-section" style="height: 420px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; align-items: stretch;">
+            <div class="stats-section">
                 <h2 class="section-title">📋 오늘 요약</h2>
-                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(2, 1fr); height: 350px; align-content: start;">
+                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(2, 1fr); height: 300px; align-content: start;">
                     <div class="loading">통계 로딩 중...</div>
                 </div>
             </div>
             
-            <div class="stats-section" style="height: 420px;">
+            <div class="stats-section">
                 <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
-                <div class="user-table" style="height: 350px; display: flex; flex-direction: column;">
-                    <div class="table-header">
+                <div class="user-table" style="height: 300px; display: flex; flex-direction: column;">
+                    <div class="table-header" style="flex-shrink: 0;">
                         총 사용자: <span id="totalUsers">-</span>명
                     </div>
                     <div class="table-content" id="userTable" style="flex: 1; overflow-y: auto;">
@@ -653,19 +653,17 @@
             `;
             
             users.forEach(user => {
-                const displayName = user.display_name || user.user_id;
-                const userDisplay = user.display_name ? 
-                    `${user.display_name}<br><small style="color: #666;">${user.user_id}</small>` : 
-                    user.user_id;
+                // 사용자 이름 우선 표시 (ID는 표시하지 않음)
+                const displayName = user.display_name || "Anonymous";
                 
                 html += `
                     <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')" style="grid-template-columns: 1fr 100px 80px 80px;">
                         <div>
-                            <div class="user-id" style="margin-bottom: 2px;">${userDisplay}</div>
+                            <div class="user-id" style="margin-bottom: 2px; color: #4CAF50; font-weight: bold;">${displayName}</div>
                             <div class="ip-address" style="font-size: 0.8rem;">${user.primary_ip}</div>
                         </div>
-                        <div style="text-align: center; font-weight: bold;">${user.total_requests}</div>
-                        <div style="text-align: center;">${user.unique_days}일</div>
+                        <div style="text-align: center; font-weight: bold; color: #FF9800;">${user.total_requests}</div>
+                        <div style="text-align: center; color: #2196F3;">${user.unique_days}일</div>
                         <div style="text-align: center; font-size: 0.9rem;">${formatDate(user.last_seen)}</div>
                     </div>
                 `;

@@ -37,6 +37,25 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
+# 사용자 이름 매핑을 위한 전역 변수
+USER_IP_MAPPING = {}
+
+# uvicorn 로그에 사용자 이름을 포함하는 포맷터
+class UserNameLogFormatter(logging.Formatter):
+    def format(self, record):
+        message = super().format(record)
+        
+        # IP 주소를 사용자 이름으로 교체
+        for ip, user_name in USER_IP_MAPPING.items():
+            if ip in message and user_name:
+                import re
+                # IP:포트 패턴을 IP (사용자명):포트로 변경
+                pattern = rf'\b{re.escape(ip)}:(\d+)\b'
+                replacement = f'{ip} ({user_name}):\\1'
+                message = re.sub(pattern, replacement, message)
+        
+        return message
+
 # 색상 포맷터 클래스
 class ColoredFormatter(logging.Formatter):
     """컬러 로그 포맷터"""
@@ -295,12 +314,16 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
             
+            # IP-사용자 매핑 업데이트 (uvicorn 로그용)
+            if user_id in logger_instance.user_stats:
+                display_name = logger_instance.user_stats[user_id].get("display_name", "")
+                if display_name:
+                    USER_IP_MAPPING[client_ip] = display_name
+            
             logger_instance.log_access(request, user_id, endpoint)
         
         # 요청 처리
         response = await call_next(request)
-        
-        # uvicorn 로그는 기본 형식 유지하고, 우리 로그만 사용자 이름 포함
         
         return response
 
@@ -531,7 +554,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:    cached = DIRLIST_CACHE.get(key)
+    if should_cache:
+    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -1441,6 +1465,16 @@ async def startup_event():
     logger.info("🚀 L3Tracker 서버 시작 (Class/Label 즉시반영)")
     logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
     logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
+    
+    # uvicorn 로거에 커스텀 포맷터 적용
+    uvicorn_logger = logging.getLogger("uvicorn.access")
+    if uvicorn_logger.handlers:
+        for handler in uvicorn_logger.handlers:
+            original_formatter = handler.formatter
+            if original_formatter:
+                custom_formatter = UserNameLogFormatter(original_formatter._fmt)
+                handler.setFormatter(custom_formatter)
+    
     _classification_dir().mkdir(parents=True, exist_ok=True)
     _labels_load()
     global CLASSES_MTIME; CLASSES_MTIME = _classes_stat_mtime()
