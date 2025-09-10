@@ -334,10 +334,10 @@
             transition: opacity 0.1s ease;
             will-change: opacity;
             transform: translateZ(0);
-            /* 고화질 이미지 렌더링 최적화 */
-            image-rendering: -webkit-optimize-contrast;
+            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 최적화 */
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
             image-rendering: crisp-edges;
-            image-rendering: high-quality;
             /* 브라우저별 고품질 렌더링 */
             -webkit-backface-visibility: hidden;
             -webkit-transform: translate3d(0, 0, 0);
@@ -404,6 +404,10 @@
             background: #000 !important;
             transform-origin: 0 0;
             z-index: 1;
+            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 설정 */
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
         }
         
         #overlay-canvas {

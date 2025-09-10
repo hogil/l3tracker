@@ -283,6 +283,14 @@ class WaferMapViewer {
         }
         this.imageCtx = this.dom.imageCanvas?.getContext('2d', { willReadFrequently: false });
         this.minimapCtx = this.dom.minimapCanvas?.getContext('2d', { willReadFrequently: false });
+        
+        // 웨이퍼맵 픽셀 정확도를 위한 이미지 스무딩 비활성화
+        if (this.imageCtx) {
+            this.imageCtx.imageSmoothingEnabled = false;
+        }
+        if (this.minimapCtx) {
+            this.minimapCtx.imageSmoothingEnabled = false;
+        }
         if (this.dom.imageCanvas) {
             this.dom.imageCanvas.style.willChange = 'transform';
             this.dom.imageCanvas.style.transform = 'translateZ(0)';
@@ -2045,6 +2053,9 @@ class WaferMapViewer {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
+            // 웨이퍼맵 픽셀 정확도를 위한 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             // 각 이미지 크기 (512px로 설정)
             const imageSize = 512;
             canvas.width = cols * imageSize;
@@ -2136,6 +2147,10 @@ class WaferMapViewer {
             const imageSize = 512;
             canvas.width = cols * imageSize;
             canvas.height = rows * imageSize;
+            
+            // 웨이퍼맵 픽셀 정확도를 위한 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -2230,6 +2245,10 @@ class WaferMapViewer {
             canvas.width = img.width;
             canvas.height = img.height;
             const ctx = canvas.getContext('2d');
+            
+            // 웨이퍼맵 픽셀 정확도를 위한 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             ctx.drawImage(img, 0, 0);
             canvas.toBlob(async (out) => {
                 try {
