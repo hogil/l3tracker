@@ -3,7 +3,7 @@ from pathlib import Path
 from math import floor
 
 # ===== 경로 / 포맷 =====
-ROOT_DIR = Path(os.getenv("PROJECT_ROOT", "D:/project/data/wm-811k")).resolve()
+ROOT_DIR = Path(os.getenv("PROJECT_ROOT", "/appdata/appuser/images")).resolve()
 THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
 
 THUMBNAIL_SIZE_DEFAULT = int(os.getenv("THUMBNAIL_SIZE", "512"))

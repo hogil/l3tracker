@@ -161,11 +161,16 @@ class AccessLogger:
                     try:
                         path_param = endpoint.split('path=')[1].split('&')[0]
                         decoded_path = urllib.parse.unquote(path_param)
-                        # 상위폴더/파일명 형식으로 축약
+                        # 경로 정보 표시 - 더 자세한 경로
                         path_parts = decoded_path.split('/')
-                        if len(path_parts) >= 2:
+                        if len(path_parts) >= 3:
+                            # 3개 이상: 상위2개폴더/파일명
+                            endpoint_display = f"{base_endpoint}→{path_parts[-3]}/{path_parts[-2]}/{path_parts[-1]}"
+                        elif len(path_parts) == 2:
+                            # 2개: 상위폴더/파일명
                             endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
                         elif len(path_parts) == 1:
+                            # 1개: 파일명만
                             endpoint_display = f"{base_endpoint}→{path_parts[-1]}"
                     except:
                         endpoint_display = base_endpoint

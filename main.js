@@ -3150,6 +3150,7 @@ class WaferMapViewer {
     handleMouseDown(e) {
         if (this.gridMode) return; // grid 모드에서는 팬(이동) 비활성화
         if (e.button !== 0) return; // Only left-click
+        e.preventDefault();
         this.isPanning = true;
         this.panStart.x = e.clientX - this.transform.dx;
         this.panStart.y = e.clientY - this.transform.dy;
@@ -3169,9 +3170,10 @@ class WaferMapViewer {
     handleMouseMove(e) {
         if (this.gridMode) return;
         if (!this.isPanning) return;
+        e.preventDefault();
         this.transform.dx = e.clientX - this.panStart.x;
         this.transform.dy = e.clientY - this.panStart.y;
-        this.scheduleDraw();
+        this.draw(); // scheduleDraw 대신 직접 draw 호출
     }
     
     handleWheel(e) {
@@ -3182,16 +3184,16 @@ class WaferMapViewer {
             e.preventDefault();
             const scaleAmount = 1 - e.deltaY * 0.001;
             this.zoomAtPoint(scaleAmount, e.clientX, e.clientY);
-            this.scheduleDraw();
+            this.draw(); // 직접 draw 호출
         } else if (e.shiftKey) {
             // allow native scroll as well as pan
             this.transform.dx -= e.deltaY; // move horizontally
-            this.scheduleDraw();
+            this.draw(); // 직접 draw 호출
             // do not preventDefault
         } else {
             // allow native scroll as well as pan
             this.transform.dy -= e.deltaY; // move vertically
-            this.scheduleDraw();
+            this.draw(); // 직접 draw 호출
             // do not preventDefault
         }
     }
