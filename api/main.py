@@ -300,13 +300,7 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         # 요청 처리
         response = await call_next(request)
         
-        # uvicorn 기본 로그에 사용자 이름 포함하도록 클라이언트 정보 수정
-        if should_log and user_id in logger_instance.user_stats:
-            display_name = logger_instance.user_stats[user_id].get("display_name", "")
-            if display_name and request.client:
-                # 클라이언트 호스트를 사용자 이름 포함 형식으로 임시 변경
-                original_host = request.client.host
-                request.client.host = f"{original_host} ({display_name})"
+        # uvicorn 로그는 기본 형식 유지하고, 우리 로그만 사용자 이름 포함
         
         return response
 
