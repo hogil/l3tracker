@@ -102,13 +102,13 @@ class UserNameLogFormatter(logging.Formatter):
         for pattern, replacement in status_patterns:
             message = re.sub(pattern, replacement, message)
         
-        # 사용자명에 고유 색상 적용
+        # 사용자명과 IP를 함께 표시
         for ip, user_name in USER_IP_MAPPING.items():
             if ip in message and user_name:
-                # IP:포트를 사용자명으로 교체하고 고유 색상 적용
-                pattern = rf'\b{re.escape(ip)}:\d+\b'
+                # IP:포트를 사용자명(IP:포트) 형태로 교체
+                pattern = rf'\b{re.escape(ip)}:(\d+)\b'
                 user_color = get_user_color(user_name)
-                replacement = f'{user_color}{user_name}\033[0m'
+                replacement = f'{user_color}{user_name}\033[0m(\033[90m{ip}:\\1\033[0m)'  # 사용자명(IP:포트)
                 message = re.sub(pattern, replacement, message)
         
         return message
@@ -379,27 +379,17 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         if should_log:
             logger_instance.update_stats(user_id, client_ip, endpoint, user_agent)
             
-            # 새 사용자이고 display_name이 없으면 시스템 사용자 이름 설정 시도
-            if (user_id in logger_instance.user_stats and 
-                not logger_instance.user_stats[user_id].get("display_name", "") and
-                "Mozilla" in user_agent):  # 브라우저 접속인 경우만
-                try:
-                    import getpass
-                    import socket
-                    system_username = getpass.getuser()
-                    hostname = socket.gethostname()
-                    if system_username and system_username != "Unknown":
-                        display_name = f"{system_username}@{hostname}"
-                        logger_instance.set_user_display_name(user_id, display_name)
-                        # IP-사용자 매핑 업데이트 (uvicorn 로그용)
-                        USER_IP_MAPPING[client_ip] = display_name
-                except Exception:
-                    pass
+            # 새 사용자는 사용자 등록 모달에서 직접 입력받도록 함
+            # 자동 시스템 계정 추출 제거 (서버 계정만 가져오는 문제)
             
-            # IP-사용자 매핑 업데이트 (기존 display_name이 있는 경우)
+            # IP-사용자 매핑 업데이트
             current_display_name = logger_instance.user_stats.get(user_id, {}).get("display_name", "")
             if current_display_name:
+                # 사용자 설정 이름이 있으면 사용
                 USER_IP_MAPPING[client_ip] = current_display_name
+            else:
+                # 이름이 없으면 IP 주소 사용
+                USER_IP_MAPPING[client_ip] = client_ip
             
             logger_instance.log_access(request, user_id, endpoint)
         
@@ -1461,35 +1451,26 @@ class SetUsernameRequest(BaseModel):
 
 @app.get("/api/get-system-username")
 async def get_system_username(http_request: Request):
-    """시스템 사용자 이름 추출 (Windows 계정 등)"""
+    """클라이언트 정보 제공 (자동 계정 추출 불가능)"""
     try:
-        import os
-        import getpass
-        import socket
-        
         # 현재 사용자 ID 생성
         client_ip = logger_instance.get_client_ip(http_request)
         user_agent = http_request.headers.get("user-agent", "Unknown")
         user_id = logger_instance.generate_user_id(client_ip, user_agent)
         
-        # 시스템 정보 추출
-        system_username = getpass.getuser()  # Windows 계정명
-        hostname = socket.gethostname()
-        
-        # 자동으로 사용자 이름 설정 (username@hostname 형식)
-        if system_username and system_username != "Unknown":
-            display_name = f"{system_username}@{hostname}"
-            logger_instance.set_user_display_name(user_id, display_name)
+        # 웹 브라우저에서는 클라이언트 시스템 계정을 직접 가져올 수 없음
+        # 사용자가 직접 입력해야 함
         
         return {
             "user_id": user_id,
-            "system_username": system_username,
-            "hostname": hostname,
-            "ip": client_ip
+            "system_username": "",  # 자동 추출 불가
+            "hostname": "",         # 자동 추출 불가
+            "ip": client_ip,
+            "message": "클라이언트 시스템 정보 자동 추출 불가능 - 수동 입력 필요"
         }
     except Exception as e:
-        logger.error(f"시스템 사용자 이름 추출 실패: {e}")
-        return {"user_id": "", "system_username": "", "hostname": "", "ip": ""}
+        logger.error(f"클라이언트 정보 제공 실패: {e}")
+        return {"user_id": "", "system_username": "", "hostname": "", "ip": "", "message": "오류 발생"}
 
 @app.post("/api/set-username")
 async def set_username(request: SetUsernameRequest, http_request: Request):

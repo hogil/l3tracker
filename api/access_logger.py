@@ -144,7 +144,7 @@ class AccessLogger:
             # 사용자별 고유 색상 적용
             user_color = self.get_user_color(display_name)
             
-            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     {user_color}{display_name}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
+            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     {user_color}{display_name}\033[0m(\033[90m{client_ip}\033[0m) - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
         else:
             log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[90mAnonymous\033[0m - \"\033[96m{method}\033[0m {endpoint} HTTP/1.1\" \033[92m200\033[0m"
         access_logger.info(log_message)

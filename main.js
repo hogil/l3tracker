@@ -38,22 +38,9 @@ class UserManager {
     }
     
     async registerUser() {
-        try {
-            // 시스템 사용자 정보 자동 추출
-            const response = await fetch('/api/get-system-username');
-            if (response.ok) {
-                const systemInfo = await response.json();
-                if (systemInfo.system_username && systemInfo.hostname) {
-                    const autoName = `${systemInfo.system_username}@${systemInfo.hostname}`;
-                    await this.setUserName(autoName);
-                    return;
-                }
-            }
-        } catch (e) {
-            console.warn('시스템 정보 자동 추출 실패:', e);
-        }
-        
-        // 자동 추출 실패시 수동 등록 모달 표시
+        // 웹 브라우저에서는 클라이언트 시스템 계정을 자동으로 가져올 수 없음
+        // 사용자가 직접 입력해야 함
+        console.log('새로운 사용자 - 등록 모달 표시');
         this.showRegistrationModal();
     }
     
@@ -66,16 +53,19 @@ class UserManager {
         
         modal.style.display = 'block';
         
-        // 자동으로 기본값 채워보기
+        // 사용자가 직접 입력하도록 기본값 제거
         try {
             const usernameInput = document.getElementById('username-input');
             const hostnameInput = document.getElementById('hostname-input');
             
-            // 브라우저 정보에서 추측해서 채우기
-            usernameInput.value = 'user';
-            hostnameInput.value = 'desktop';
+            // 플레이스홀더만 제공
+            usernameInput.placeholder = '계정명을 입력하세요';
+            hostnameInput.placeholder = 'PC 이름을 입력하세요';
+            
+            // 포커스
+            usernameInput.focus();
         } catch (e) {
-            console.warn('기본값 설정 실패:', e);
+            console.warn('입력 필드 설정 실패:', e);
         }
         
         // 등록 버튼 이벤트
