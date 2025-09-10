@@ -1428,13 +1428,21 @@ async def browse_folders(path: Optional[str] = None):
 
 if __name__ == "__main__":
     import uvicorn
+    import sys
+    import os
     
-    # 서버 시작 메시지
-    print("🚀 L3Tracker 서버 시작 중...")
-    print(f"📍 호스트: {config.DEFAULT_HOST}")
-    print(f"🔌 포트: {config.DEFAULT_PORT}")
-    print(f"📁 루트 디렉토리: {config.ROOT_DIR}")
-    print("=" * 50)
+    # 서버 시작 메시지 강제 출력
+    sys.stdout.write("🚀 L3Tracker 서버 시작 중...\n")
+    sys.stdout.write(f"📍 호스트: {config.DEFAULT_HOST}\n")
+    sys.stdout.write(f"🔌 포트: {config.DEFAULT_PORT}\n")
+    sys.stdout.write(f"📁 루트 디렉토리: {config.ROOT_DIR}\n")
+    sys.stdout.write("=" * 50 + "\n")
+    sys.stdout.flush()
+    
+    # 환경 변수 확인
+    sys.stdout.write(f"🔧 PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}\n")
+    sys.stdout.write("=" * 50 + "\n")
+    sys.stdout.flush()
     
     uvicorn.run(
         app,
