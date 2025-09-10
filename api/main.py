@@ -550,11 +550,12 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     image_mtime = image_path.stat().st_mtime
     
     # 썸네일이 존재하고 원본보다 최신인 경우에만 기존 썸네일 사용
+    cached = False
     if thumb.exists() and thumb.stat().st_size > 0:
         thumb_mtime = thumb.stat().st_mtime
-        if thumb_mtime >= image_mtime:     cached = THUMB_STAT_CACHE.get(key)
+        if thumb_mtime >= image_mtime:
+            cached = THUMB_STAT_CACHE.get(key)
     if cached:
-        return thumb
         THUMB_STAT_CACHE.set(key, True)
         return thumb
 

@@ -182,6 +182,9 @@ class AccessLogger:
                         endpoint_display = base_endpoint
                 else:
                     endpoint_display = base_endpoint
+            else:
+                # /api/로 시작하지만 ?가 없는 경우 (예: /api/image)
+                endpoint_display = endpoint_display
         
         endpoint_col = f"{endpoint_display:<50}"  # 50자리로 증가 (더 긴 경로 표시용)
         status_col = f"{status_code:>3}"         # 3자리 (우측 정렬)
@@ -196,13 +199,14 @@ class AccessLogger:
         method_with_color = f"{method_color}{method_col}\033[0m"
         status_with_color = f"{status_color}{status_col}\033[0m"
         
-        # 고정 너비로 정렬 (색상 코드 길이 보정) + 여백 추가
-        type_padded = f"{type_with_color:<12}"  # 색상코드 포함 12자리
+        # 🎯 완벽한 테이블 정렬 - 모든 타입이 동일한 위치에 정렬
+        # 타입별로 글자 수가 달라도 시간/IP/GET 시작 위치가 동일하게
+        type_padded = f"{type_with_color:<15}"  # 색상코드 포함 15자리 (API, IMAGE, PAGE 모두 동일)
         ip_padded = f"{ip_with_color:<20}"      # 색상코드 포함 20자리  
         method_padded = f"{method_with_color:<9}"  # 색상코드 포함 9자리
         status_padded = f"{status_with_color:>8}"  # 색상코드 포함 8자리 (우측정렬)
         
-        # 🎯 여백 추가로 가독성 향상
+        # 🎯 완벽한 정렬 - 모든 컬럼이 고정 위치에
         message = (
             f"{type_padded}  {timestamp_col}  "  # 타입-시간 간 여백 2칸
             f"{ip_padded}  {method_padded}  "    # IP-메서드 간 여백 2칸
