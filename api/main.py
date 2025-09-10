@@ -202,7 +202,8 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         # 로그에서 제외할 경로들 (필요한 사용자 액션은 제외하지 않음)
         skip_paths = [
             "/favicon.ico", "/static/", "/js/",
-            "/api/files/all"  # 인덱스 구축 요청만 제외 (이미지/썸네일은 사용자 액션이므로 허용)
+            "/api/files/all",  # 인덱스 구축 요청만 제외 (이미지/썸네일은 사용자 액션이므로 허용)
+            "/api/stats/"      # 대시보드 폴링 엔드포인트 전부 로그 제외
         ]
         
         # 너무 자주 반복되는 API 요청 제한
@@ -218,18 +219,8 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             temp_logger = AccessLogger()
             log_type = temp_logger._determine_log_type(endpoint, request.method)
             
-            # stats 엔드포인트는 로그 완전 제한 (자동 폴링 방지)
-            if endpoint.startswith('/api/stats/'):
-                print(f"🚫 STATS 차단: {endpoint}")
-                # stats는 로그 없이 바로 반환
-                return response
-            
-            # stats 관련 모든 엔드포인트 차단
-            if 'stats' in endpoint:
-                print(f"🚫 STATS 차단: {endpoint}")
-                return response
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
-            elif log_type not in ['ACTION', 'IMAGE']:
+            if log_type not in ['ACTION', 'IMAGE']:
                 should_log = logger_instance.should_log_frequent_api(client_ip, endpoint)
         
         # IP 기반 간단한 접속 로깅 (응답 후 처리)
@@ -1437,6 +1428,8 @@ async def browse_folders(path: Optional[str] = None):
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # 서버 시작 메시지
     print("🚀 L3Tracker 서버 시작 중...")
     print(f"📍 호스트: {config.DEFAULT_HOST}")
     print(f"🔌 포트: {config.DEFAULT_PORT}")
