@@ -54,8 +54,8 @@ class UserNameLogFormatter(logging.Formatter):
                 replacement = f'\033[92m{user_name}\033[0m'  # 초록색 사용자명
                 message = re.sub(pattern, replacement, message)
         
-        # INFO 레벨에 색상 적용 (밝은 초록색)
-        message = re.sub(r'\bINFO\b', '\033[92mINFO\033[0m', message)
+        # INFO 레벨에 색상 적용 (밝은 파란색)
+        message = re.sub(r'\bINFO\b', '\033[94mINFO\033[0m', message)
         
         # HTTP 메서드에 다양한 예쁜 색상 적용
         http_methods = {
@@ -71,11 +71,11 @@ class UserNameLogFormatter(logging.Formatter):
                 colored_method = f'"{color}{method}\033[0m '
                 message = message.replace(pattern, colored_method)
         
-        # HTTP 상태 코드에 예쁜 색상 적용
+        # HTTP 상태 코드에 예쁜 색상 적용 (INFO, 사용자명과 구분)
         status_patterns = [
-            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 밝은 초록 (성공)
-            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 밝은 파랑 (리다이렉트)
-            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 밝은 노랑 (클라이언트 오류)
+            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 2xx: 밝은 노랑 (성공)
+            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[96m\2\033[0m\3'),  # 3xx: 밝은 청록 (리다이렉트)
+            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 4xx: 밝은 빨강 (클라이언트 오류)
             (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 밝은 빨강 (서버 오류)
         ]
         
@@ -373,11 +373,11 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
             
+            # 모든 사용자를 hgchoi@choi로 강제 설정
+            logger_instance.set_user_display_name(user_id, "hgchoi@choi")
+            
             # IP-사용자 매핑 업데이트 (uvicorn 로그용)
-            if user_id in logger_instance.user_stats:
-                display_name = logger_instance.user_stats[user_id].get("display_name", "")
-                if display_name:
-                    USER_IP_MAPPING[client_ip] = display_name
+            USER_IP_MAPPING[client_ip] = "hgchoi@choi"
             
             logger_instance.log_access(request, user_id, endpoint)
         
@@ -613,8 +613,10 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             break
 
     key = str(target)
-    if should_cache:    cached = DIRLIST_CACHE.get(key)
-    if cached is not None:        return cached
+    if should_cache:
+        cached = DIRLIST_CACHE.get(key)
+        if cached is not None:
+            return cached
 
     items: List[Dict[str, str]] = []
     try:
