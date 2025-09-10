@@ -62,7 +62,7 @@ class HTTPLogFormatter(logging.Formatter):
                 colored_method = f'"{color}{method}\033[0m '
                 message = message.replace(pattern, colored_method)
         
-        # HTTP 상태 코드에 예쁜 색상 적용 (INFO, 사용자명과 구분)
+        # HTTP 상태 코드에 색상 적용
         status_patterns = [
             (r'(\s)([2]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 2xx: 밝은 노랑 (성공)
             (r'(\s)([3]\d{2})(\s|$)', r'\1\033[96m\2\033[0m\3'),  # 3xx: 밝은 청록 (리다이렉트)

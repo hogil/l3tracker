@@ -48,7 +48,7 @@ class AccessLogger:
         
         # IP를 15자리로 맞춰서 정렬 (INFO 로그와 맞춤)
         formatted_ip = f"{client_ip:<15}"  # 왼쪽 정렬, 15자리
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]  # 밀리초 포함
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S\t%f')[:-3]  # 탭으로 구분
         
         log_message = f"\033[93mACCESS\033[0m: {timestamp} \033[90m{formatted_ip}\033[0m - \"{method_color}{method}\033[0m {endpoint} HTTP/1.1\" \033[93m200\033[0m"
         access_logger.info(log_message)
