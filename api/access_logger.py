@@ -142,22 +142,47 @@ class AccessLogger:
         }
         type_color = type_colors.get(log_type_name, '\033[97m')
         
-        # 넉넉한 컬럼 정렬
-        log_type = f"{log_type_name:<10}"    # 10자리
+        # 컴팩트한 컬럼 정렬
+        log_type = f"{log_type_name:<3}"     # 3자리 (API, PAGE, FILE 등)
         timestamp_col = timestamp            # 19자리 (YYYY-MM-DD HH:MM:SS)
         ip_col = f"{ip:<15}"                # 15자리
-        method_col = f"{method:<5}"          # 5자리 (GET=3, POST=4, DELETE=6)
-        endpoint_col = f"{endpoint:<35}"     # 35자리
-        status_col = f"{status_code:>3}"     # 3자리 (우측 정렬)
+        method_col = f"{method:<4}"          # 4자리 (GET, POST, PUT, DEL)
+        
+        # 상위폴더+파일명 추출 (예: files→folder/image.png)
+        endpoint_display = endpoint
+        if endpoint.startswith('/api/'):
+            endpoint_display = endpoint[5:]  # /api/ 제거
+            if '?' in endpoint_display:
+                base_endpoint = endpoint_display.split('?')[0]
+                
+                # path 파라미터에서 파일 정보 추출
+                if 'path=' in endpoint:
+                    import urllib.parse
+                    try:
+                        path_param = endpoint.split('path=')[1].split('&')[0]
+                        decoded_path = urllib.parse.unquote(path_param)
+                        # 상위폴더/파일명 형식으로 축약
+                        path_parts = decoded_path.split('/')
+                        if len(path_parts) >= 2:
+                            endpoint_display = f"{base_endpoint}→{path_parts[-2]}/{path_parts[-1]}"
+                        elif len(path_parts) == 1:
+                            endpoint_display = f"{base_endpoint}→{path_parts[-1]}"
+                    except:
+                        endpoint_display = base_endpoint
+                else:
+                    endpoint_display = base_endpoint
+        
+        endpoint_col = f"{endpoint_display:<40}"  # 40자리로 증가 (경로 표시용)
+        status_col = f"{status_code:>3}"         # 3자리 (우측 정렬)
         
         # 추가 정보가 있으면 표시
         extra_part = f" {extra_info}" if extra_info else ""
         
-        # 구분된 테이블 형식 로그 (콜론 제거, 추가 정보 포함)
+        # 컴팩트한 테이블 형식 로그
         message = (
-            f"{type_color}{log_type}\033[0m    {timestamp_col}    "
-            f"\033[90m{ip_col}\033[0m   {method_color}{method_col}\033[0m   "
-            f"{endpoint_col}   {status_color}{status_col}\033[0m{extra_part}"
+            f"{type_color}{log_type}\033[0m {timestamp_col} "
+            f"\033[90m{ip_col}\033[0m {method_color}{method_col}\033[0m "
+            f"{endpoint_col} {status_color}{status_col}\033[0m{extra_part}"
         )
         
         # 콘솔에 테이블 형식으로 출력

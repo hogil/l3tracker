@@ -242,6 +242,50 @@
             background: #000 !important;
         }
         
+        /* 🎯 웨이퍼맵 픽셀 완벽 렌더링 - 브라우저 보간 완전 차단 */
+        .viewer-container img,
+        .viewer-container canvas,
+        #image-canvas,
+        #overlay-canvas {
+            /* 최강 픽셀 완벽 렌더링 - 모든 브라우저 대응 */
+            image-rendering: pixelated !important;
+            image-rendering: -moz-crisp-edges !important;
+            image-rendering: crisp-edges !important;
+            image-rendering: -webkit-crisp-edges !important;
+            image-rendering: -webkit-optimize-contrast !important;
+            -ms-interpolation-mode: nearest-neighbor !important;
+            
+            /* Chrome/Edge 강제 픽셀 완벽 */
+            image-rendering: -webkit-pixelated !important;
+            
+            /* 모든 스무딩 완전 제거 */
+            -webkit-font-smoothing: none !important;
+            -moz-osx-font-smoothing: unset !important;
+            font-smooth: never !important;
+            text-rendering: geometricPrecision !important;
+            
+            /* GPU 렌더링 최적화 */
+            transform: translateZ(0) !important;
+            will-change: transform !important;
+            backface-visibility: hidden !important;
+            -webkit-backface-visibility: hidden !important;
+            
+            /* 브라우저 자동 최적화 차단 */
+            -webkit-transform: translate3d(0, 0, 0) !important;
+            transform-style: preserve-3d !important;
+            
+            /* 즉시 반응 */
+            transition: none !important;
+            
+            /* 필터 완전 제거 */
+            filter: none !important;
+            -webkit-filter: none !important;
+            
+            /* 안티앨리어싱 완전 차단 */
+            -webkit-text-stroke: 0 !important;
+            text-shadow: none !important;
+        }
+        
         /* 그리드 모드에서도 배경 확실히 검은색 */
         .viewer-container.grid-mode {
             background: #000 !important;
@@ -334,20 +378,31 @@
             transition: opacity 0.1s ease;
             will-change: opacity;
             transform: translateZ(0);
-            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 최적화 - 절대적 픽셀 정확도 */
-            image-rendering: pixelated;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
-            image-rendering: -webkit-optimize-contrast;
-            -ms-interpolation-mode: nearest-neighbor;
-            /* 브라우저별 고품질 렌더링 */
-            -webkit-backface-visibility: hidden;
-            -webkit-transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
-            /* 추가적인 픽셀 완벽 렌더링 설정 */
-            -webkit-font-smoothing: none;
-            -moz-osx-font-smoothing: unset;
-            filter: contrast(1) brightness(1);
+            
+            /* 🔥 웨이퍼맵 픽셀 완벽성 - 브라우저 보간 완전 차단 */
+            image-rendering: pixelated !important;
+            image-rendering: -moz-crisp-edges !important;
+            image-rendering: crisp-edges !important;
+            image-rendering: -webkit-crisp-edges !important;
+            image-rendering: -webkit-optimize-contrast !important;
+            image-rendering: -webkit-pixelated !important;
+            -ms-interpolation-mode: nearest-neighbor !important;
+            
+            /* 모든 스무딩 완전 제거 */
+            -webkit-font-smoothing: none !important;
+            -moz-osx-font-smoothing: unset !important;
+            font-smooth: never !important;
+            text-rendering: geometricPrecision !important;
+            
+            /* GPU 최적화 */
+            -webkit-backface-visibility: hidden !important;
+            -webkit-transform: translate3d(0, 0, 0) !important;
+            backface-visibility: hidden !important;
+            transform-style: preserve-3d !important;
+            
+            /* 필터 제거 */
+            filter: none !important;
+            -webkit-filter: none !important;
         }
         
         .grid-thumb-img.lazy,
@@ -397,7 +452,7 @@
             box-shadow: 0 0 0 1px rgba(0, 153, 255, 0.3);
         }
         
-        /* Single Image Mode */
+        /* Single Image Mode - 웨이퍼맵 픽셀 완벽 렌더링 */
         #image-canvas,
         #overlay-canvas {
             display: block;
@@ -410,10 +465,30 @@
             background: #000 !important;
             transform-origin: 0 0;
             z-index: 1;
-            /* 웨이퍼맵 픽셀 정확도를 위한 렌더링 설정 */
-            image-rendering: pixelated;
-            image-rendering: -moz-crisp-edges;
-            image-rendering: crisp-edges;
+            
+            /* 🎯 최강 픽셀 완벽 렌더링 - 브라우저 보간 완전 차단 */
+            image-rendering: pixelated !important;
+            image-rendering: -moz-crisp-edges !important;
+            image-rendering: crisp-edges !important;
+            image-rendering: -webkit-crisp-edges !important;
+            image-rendering: -webkit-optimize-contrast !important;
+            image-rendering: -webkit-pixelated !important;
+            -ms-interpolation-mode: nearest-neighbor !important;
+            
+            /* 캔버스 컨텍스트 픽셀 완벽 */
+            -webkit-font-smoothing: none !important;
+            -moz-osx-font-smoothing: unset !important;
+            font-smooth: never !important;
+            
+            /* GPU 최적화 */
+            transform: translateZ(0) !important;
+            will-change: transform !important;
+            backface-visibility: hidden !important;
+            -webkit-backface-visibility: hidden !important;
+            
+            /* 필터 제거 */
+            filter: none !important;
+            -webkit-filter: none !important;
         }
         
         #overlay-canvas {
@@ -429,10 +504,10 @@
             visibility: hidden !important;
         }
         
-        /* View Controls */
+        /* View Controls - 위로 더 올림 */
         .view-controls {
             position: absolute;
-            top: calc(var(--filename-bar-height) + 10px);
+            top: 5px;
             right: 10px;
             z-index: 20;
             display: flex;

@@ -3453,8 +3453,46 @@ class WaferMapViewer {
                     currentImagePath: this.currentImagePath,
                     gridMode: this.gridMode,
                     selectedImagePath: this.selectedImagePath,
-                    gridSelectedIdxs: this.gridSelectedIdxs
+                    gridSelectedIdxs: this.gridSelectedIdxs,
+                    isCtrl: isCtrl,
+                    isShift: isShift
                 });
+                
+                // 🔥 강제로 크게보기 모드 라벨링 시도
+                if (!isCtrl && !isShift && this.currentImagePath) {
+                    console.log('🚀 강제 크게보기 모드 라벨링 시도!');
+                    this.selectedClass = cls;
+                    if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
+                    
+                    const requestBody = { class_name: cls, image_path: this.currentImagePath };
+                    console.log('🎯 강제 분류 요청:', requestBody);
+                    
+                    try {
+                        const response = await fetch('/api/classify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
+                        
+                        if (response.ok) {
+                            console.log('✅ 강제 라벨링 성공!');
+                            // 버튼 색상 피드백
+                            const originalBg = btn.style.background;
+                            btn.style.background = '#2ecc40';
+                            setTimeout(() => {
+                                btn.style.background = originalBg;
+                                this.refreshLabelExplorer();
+                                setTimeout(() => this.refreshLabelExplorer(), 100);
+                            }, 200);
+                            return;
+                        } else {
+                            const errorText = await response.text();
+                            console.error('❌ 강제 라벨링 실패:', response.status, errorText);
+                        }
+                    } catch (error) {
+                        console.error('❌ 강제 라벨링 에러:', error);
+                    }
+                }
                 
                 if (!isCtrl && !isShift) {
                     // 🎯 크게보기 모드: 현재 표시 중인 이미지 바로 라벨링
