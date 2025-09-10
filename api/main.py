@@ -457,7 +457,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     key = str(target)
     cached = None
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
+    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -486,7 +486,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
         items = directories + files
         if should_cache:
-            DIRLIST_CACHE.set(key, items)
+        DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -555,11 +555,11 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     if thumb.exists() and thumb.stat().st_size > 0:
         thumb_mtime = thumb.stat().st_mtime
         if thumb_mtime >= image_mtime:
-            cached = THUMB_STAT_CACHE.get(key)
-            if cached:
-                return thumb
-            THUMB_STAT_CACHE.set(key, True)
-            return thumb
+    cached = THUMB_STAT_CACHE.get(key)
+    if cached:
+        return thumb
+        THUMB_STAT_CACHE.set(key, True)
+        return thumb
 
     # 썸네일이 없거나 구버전이면 새로 생성
     async with THUMBNAIL_SEM:
@@ -567,8 +567,8 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
             if thumb_mtime >= image_mtime:
-                THUMB_STAT_CACHE.set(key, True)
-                return thumb
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
         if thumb.exists():
