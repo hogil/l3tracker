@@ -76,11 +76,11 @@ class AccessLogger:
         if user_id in self.user_stats:
             display_name = self.user_stats[user_id].get("display_name", "")
         
-        # 콘솔 및 파일 로그 (INFO 형식과 통일)
+        # 콘솔 및 파일 로그 (INFO 형식과 통일, ACCESS는 주황색)
         if display_name:
-            log_message = f"ACCESS: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[92m{display_name}\033[0m - \"\033[96m{method}\033[0m \033[94m{endpoint}\033[0m HTTP/1.1\" \033[92m200\033[0m"
+            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[92m{display_name}\033[0m - \"\033[96m{method}\033[0m \033[94m{endpoint}\033[0m HTTP/1.1\" \033[92m200\033[0m"
         else:
-            log_message = f"ACCESS: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[90mAnonymous\033[0m - \"\033[96m{method}\033[0m \033[94m{endpoint}\033[0m HTTP/1.1\" \033[92m200\033[0m"
+            log_message = f"\033[93mACCESS\033[0m: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}     \033[90mAnonymous\033[0m - \"\033[96m{method}\033[0m \033[94m{endpoint}\033[0m HTTP/1.1\" \033[92m200\033[0m"
         access_logger.info(log_message)
     
     def get_client_ip(self, request: Request) -> str:

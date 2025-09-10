@@ -54,7 +54,7 @@ class UserNameLogFormatter(logging.Formatter):
                 replacement = f'\033[92m{user_name}\033[0m'  # 초록색 사용자명
                 message = re.sub(pattern, replacement, message)
         
-        # INFO 레벨에 색상 적용
+        # INFO 레벨에 색상 적용 (초록색)
         message = re.sub(r'\bINFO\b', '\033[32mINFO\033[0m', message)
         
         # HTTP 메서드에 색상 적용
