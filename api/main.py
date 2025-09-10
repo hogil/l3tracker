@@ -223,6 +223,11 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 print(f"DEBUG: stats 엔드포인트 감지됨: {endpoint}")
                 # stats는 로그 없이 바로 반환
                 return response
+            
+            # stats 관련 모든 엔드포인트 차단
+            if 'stats' in endpoint:
+                print(f"DEBUG: stats 관련 엔드포인트 감지됨: {endpoint}")
+                return response
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
             elif log_type not in ['ACTION', 'IMAGE']:
                 should_log = logger_instance.should_log_frequent_api(client_ip, endpoint)
@@ -1440,4 +1445,6 @@ if __name__ == "__main__":
         workers=config.DEFAULT_WORKERS,
         log_level="info",     # 서버 시작 로그 표시
         access_log=True,      # uvicorn access 로그 활성화 (서버 시작 메시지용)
+        use_colors=True,      # 컬러 로그 활성화
+        log_config=None,      # 기본 로그 설정 사용
     )
