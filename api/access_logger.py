@@ -78,9 +78,9 @@ class AccessLogger:
         
         # 콘솔 및 파일 로그
         if display_name:
-            log_message = f"🔗 {client_ip} | {display_name} (ID:{user_id[:8]}) | {method} {endpoint}"
+            log_message = f"🔗 {client_ip} | {display_name} | {method} {endpoint}"
         else:
-            log_message = f"🔗 {client_ip} | ID:{user_id[:8]} | {method} {endpoint}"
+            log_message = f"🔗 {client_ip} | Anonymous | {method} {endpoint}"
         access_logger.info(log_message)
     
     def get_client_ip(self, request: Request) -> str:

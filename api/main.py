@@ -286,9 +286,12 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 "Mozilla" in user_agent):  # 브라우저 접속인 경우만
                 try:
                     import getpass
+                    import socket
                     system_username = getpass.getuser()
+                    hostname = socket.gethostname()
                     if system_username and system_username != "Unknown":
-                        logger_instance.set_user_display_name(user_id, system_username)
+                        display_name = f"{system_username}@{hostname}"
+                        logger_instance.set_user_display_name(user_id, display_name)
                 except Exception:
                     pass
             
@@ -1359,9 +1362,10 @@ async def get_system_username(http_request: Request):
         system_username = getpass.getuser()  # Windows 계정명
         hostname = socket.gethostname()
         
-        # 자동으로 사용자 이름 설정
+        # 자동으로 사용자 이름 설정 (username@hostname 형식)
         if system_username and system_username != "Unknown":
-            logger_instance.set_user_display_name(user_id, system_username)
+            display_name = f"{system_username}@{hostname}"
+            logger_instance.set_user_display_name(user_id, display_name)
         
         return {
             "user_id": user_id,
