@@ -54,15 +54,15 @@ class UserNameLogFormatter(logging.Formatter):
                 replacement = f'\033[92m{user_name}\033[0m'  # 초록색 사용자명
                 message = re.sub(pattern, replacement, message)
         
-        # INFO 레벨에 색상 적용 (초록색)
-        message = re.sub(r'\bINFO\b', '\033[32mINFO\033[0m', message)
+        # INFO 레벨에 색상 적용 (밝은 초록색)
+        message = re.sub(r'\bINFO\b', '\033[92mINFO\033[0m', message)
         
-        # HTTP 메서드에 색상 적용
+        # HTTP 메서드에 다양한 예쁜 색상 적용
         http_methods = {
-            'GET': '\033[96m',     # 밝은 청록색
-            'POST': '\033[93m',    # 밝은 노란색
-            'PUT': '\033[94m',     # 밝은 파란색
-            'DELETE': '\033[91m',  # 밝은 빨간색
+            'GET': '\033[96m',     # 밝은 청록색 (시원함)
+            'POST': '\033[95m',    # 밝은 마젠타색 (활동적)
+            'PUT': '\033[94m',     # 밝은 파란색 (안정감)
+            'DELETE': '\033[91m',  # 밝은 빨간색 (경고)
         }
         
         for method, color in http_methods.items():
@@ -71,16 +71,24 @@ class UserNameLogFormatter(logging.Formatter):
                 colored_method = f'"{color}{method}\033[0m '
                 message = message.replace(pattern, colored_method)
         
-        # HTTP 상태 코드에 색상 적용
+        # HTTP 상태 코드에 예쁜 색상 적용
         status_patterns = [
-            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 초록
-            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 파랑
-            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 노랑
-            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 빨강
+            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 밝은 초록 (성공)
+            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 밝은 파랑 (리다이렉트)
+            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 밝은 노랑 (클라이언트 오류)
+            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 밝은 빨강 (서버 오류)
         ]
         
         for pattern, replacement in status_patterns:
             message = re.sub(pattern, replacement, message)
+        
+        # 사용자명에 특별한 색상 적용 (하늘색)
+        for ip, user_name in USER_IP_MAPPING.items():
+            if ip in message and user_name:
+                # 사용자명을 하늘색으로 (더 눈에 띄게)
+                pattern = rf'\b{re.escape(ip)}:\d+\b'
+                replacement = f'\033[36m{user_name}\033[0m'  # 하늘색 사용자명
+                message = re.sub(pattern, replacement, message)
         
         return message
 
