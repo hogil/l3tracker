@@ -37,153 +37,32 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
-
-
-# HTTP 로그 색상 포맷터
-class HTTPLogFormatter(logging.Formatter):
-    def format(self, record):
-        message = super().format(record)
-        
-        
-        # INFO 레벨에 색상 적용 (밝은 파란색)
-        message = re.sub(r'\bINFO\b', '\033[94mINFO\033[0m', message)
-        
-        # HTTP 메서드에 색상 적용
-        http_methods = {
-            'GET': '\033[96m',     # 밝은 청록색 (시원함)
-            'POST': '\033[95m',    # 밝은 마젠타색 (활동적)
-            'PUT': '\033[94m',     # 밝은 파란색 (안정감)
-            'DELETE': '\033[91m',  # 밝은 빨간색 (경고)
-        }
-        
-        for method, color in http_methods.items():
-            pattern = f'"{method} '
-            if pattern in message:
-                colored_method = f'"{color}{method}\033[0m '
-                message = message.replace(pattern, colored_method)
-        
-        # HTTP 상태 코드에 색상 적용
-        status_patterns = [
-            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 2xx: 밝은 노랑 (성공)
-            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[96m\2\033[0m\3'),  # 3xx: 밝은 청록 (리다이렉트)
-            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 4xx: 밝은 빨강 (클라이언트 오류)
-            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 밝은 빨강 (서버 오류)
-        ]
-        
-        for pattern, replacement in status_patterns:
-            message = re.sub(pattern, replacement, message)
-        
-        
-        return message
-
-# 색상 포맷터 클래스
-class ColoredFormatter(logging.Formatter):
-    """컬러 로그 포맷터"""
-    
-    COLORS = {
-        'DEBUG': '\033[36m',    # 청록색
-        'INFO': '\033[32m',     # 초록색
-        'WARNING': '\033[33m',  # 노란색
-        'ERROR': '\033[31m',    # 빨간색
-        'CRITICAL': '\033[35m', # 자주색
-        'RESET': '\033[0m'      # 리셋
-    }
-    
-    def format(self, record):
-        # 레벨에 따른 색상 적용
-        level_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
-        reset_color = self.COLORS['RESET']
-        
-        # 원래 포맷 적용
-        formatted = super().format(record)
-        
-        # 색상 적용: 레벨명 색상 적용
-        colored_level = f"{level_color}{record.levelname}{reset_color}"
-        formatted = formatted.replace(record.levelname, colored_level, 1)
-        
-        # HTTP 메서드와 상태 코드에 색상 추가
-        formatted = self._colorize_http_content(formatted)
-        
-        
-        return formatted
-    
-    
-    def _colorize_http_content(self, text):
-        """HTTP 메서드와 상태 코드에 색상 적용"""
-        import re
-        
-        # HTTP 메서드 색상 적용
-        http_methods = {
-            'GET': '\033[96m',     # 밝은 청록색
-            'POST': '\033[93m',    # 밝은 노란색
-            'PUT': '\033[94m',     # 밝은 파란색
-            'DELETE': '\033[91m',  # 밝은 빨간색
-            'PATCH': '\033[95m',   # 밝은 자주색
-            'HEAD': '\033[92m',    # 밝은 초록색
-            'OPTIONS': '\033[97m'  # 밝은 흰색
-        }
-        
-        # HTTP 메서드 패턴 매칭 및 색상 적용
-        for method, color in http_methods.items():
-            pattern = f'"{method} '
-            if pattern in text:
-                colored_method = f'"{color}{method}\033[0m '
-                text = text.replace(pattern, colored_method)
-        
-        # 상태 코드 색상 적용 (200번대: 초록, 400번대: 노랑, 500번대: 빨강)
-        status_patterns = [
-            (r'(\s)([2]\d{2})(\s|$)', r'\1\033[92m\2\033[0m\3'),  # 2xx: 밝은 초록
-            (r'(\s)([3]\d{2})(\s|$)', r'\1\033[94m\2\033[0m\3'),  # 3xx: 밝은 파랑
-            (r'(\s)([4]\d{2})(\s|$)', r'\1\033[93m\2\033[0m\3'),  # 4xx: 밝은 노랑
-            (r'(\s)([5]\d{2})(\s|$)', r'\1\033[91m\2\033[0m\3'),  # 5xx: 밝은 빨강
-        ]
-        
-        for pattern, replacement in status_patterns:
-            text = re.sub(pattern, replacement, text)
-        
-        
-        return text
-
-# uvicorn 로깅 설정 (옵션 없이도 시간 표시 + 색상)
+# 단순화된 로깅 설정
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "default": {
-            "()": ColoredFormatter,
-            "format": "%(levelname)s: %(asctime)s     %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S"
-        },
-        "access": {
-            "()": ColoredFormatter,
+        "simple": {
             "format": "%(levelname)s: %(asctime)s     %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         }
     },
     "handlers": {
-        "default": {
-            "formatter": "default",
+        "console": {
             "class": "logging.StreamHandler",
-            "stream": "ext://sys.stdout"
-        },
-        "access": {
-            "formatter": "access", 
-            "class": "logging.StreamHandler",
+            "formatter": "simple",
             "stream": "ext://sys.stdout"
         }
     },
     "loggers": {
         "uvicorn": {
-            "handlers": ["default"],
+            "handlers": ["console"],
             "level": "INFO",
             "propagate": False
         },
-        "uvicorn.error": {
-            "level": "INFO"
-        },
         "uvicorn.access": {
-            "handlers": ["access"],
-            "level": "INFO", 
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False
         }
     }
@@ -553,7 +432,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     cached = None
-    if should_cache:    cached = DIRLIST_CACHE.get(key)
+    if should_cache:
+        cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
@@ -581,7 +461,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
             logger.info(f"정렬된 디렉터리 순서: {[d['name'] for d in directories[:5]]}")
 
         items = directories + files
-        if should_cache:        DIRLIST_CACHE.set(key, items)
+        if should_cache:
+            DIRLIST_CACHE.set(key, items)
     except FileNotFoundError:
         pass
     return items
@@ -649,19 +530,21 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     # 썸네일이 존재하고 원본보다 최신인 경우에만 기존 썸네일 사용
     if thumb.exists() and thumb.stat().st_size > 0:
         thumb_mtime = thumb.stat().st_mtime
-        if thumb_mtime >= image_mtime:cached = THUMB_STAT_CACHE.get(key)
-    if cached:
-        return thumb
-        THUMB_STAT_CACHE.set(key, True)
-        return thumb
+        if thumb_mtime >= image_mtime:
+            cached = THUMB_STAT_CACHE.get(key)
+            if cached:
+                return thumb
+            THUMB_STAT_CACHE.set(key, True)
+            return thumb
 
     # 썸네일이 없거나 구버전이면 새로 생성
     async with THUMBNAIL_SEM:
         # 다시 한번 확인 (동시성 고려)
         if thumb.exists() and thumb.stat().st_size > 0:
             thumb_mtime = thumb.stat().st_mtime
-            if thumb_mtime >= image_mtime:            THUMB_STAT_CACHE.set(key, True)
-            return thumb
+            if thumb_mtime >= image_mtime:
+                THUMB_STAT_CACHE.set(key, True)
+                return thumb
         
         # 기존 썸네일 파일 삭제 (구버전인 경우)
         if thumb.exists():
@@ -1314,7 +1197,7 @@ async def delete_classification(req: ClassifyDeleteRequest):
         logger.exception(f"분류 제거 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ========== 접속 통계 API (단순화) ==========
+# ========== 접속 통계 API ==========
 @app.get("/api/stats/daily")
 async def get_daily_stats():
     """일별 접속 통계"""
@@ -1329,6 +1212,24 @@ async def get_trend_stats(days: int = Query(7, ge=1, le=30)):
 async def get_monthly_stats(months: int = Query(3, ge=1, le=12)):
     """월별 트렌드 통계"""
     return logger_instance.get_monthly_trend(months)
+
+@app.get("/api/stats/users")
+async def get_users_stats():
+    """사용자 통계"""
+    return logger_instance.get_users_stats()
+
+@app.get("/api/stats/recent-users")
+async def get_recent_users():
+    """최근 활성 사용자"""
+    return logger_instance.get_recent_users()
+
+@app.get("/api/stats/user/{user_id}")
+async def get_user_detail(user_id: str):
+    """특정 사용자 상세 정보"""
+    user_detail = logger_instance.get_user_detail(user_id)
+    if user_detail is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user_detail
 
 # ========== 기타 ==========
 app.mount("/js", StaticFiles(directory="js"), name="js")
@@ -1371,18 +1272,9 @@ async def get_main_js():
 # ========== 라이프사이클 ==========
 @app.on_event("startup")
 async def startup_event():
-    logger.info("🚀 L3Tracker 서버 시작 (Class/Label 즉시반영)")
+    logger.info("🚀 L3Tracker 서버 시작 (테이블 로그 시스템)")
     logger.info(f"📁 ROOT_DIR: {ROOT_DIR}")
     logger.info(f"🧵 IO_THREADS: {IO_THREADS}, 🧮 THUMBNAIL_SEM: {THUMBNAIL_SEM_SIZE}")
-    
-    # uvicorn 로거에 HTTP 로그 포맷터 적용
-    uvicorn_logger = logging.getLogger("uvicorn.access")
-    if uvicorn_logger.handlers:
-        for handler in uvicorn_logger.handlers:
-            original_formatter = handler.formatter
-            if original_formatter:
-                custom_formatter = HTTPLogFormatter(original_formatter._fmt)
-                handler.setFormatter(custom_formatter)
     
     _classification_dir().mkdir(parents=True, exist_ok=True)
     _labels_load()
