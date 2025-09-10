@@ -327,38 +327,48 @@
         
         <div class="controls">
             <button class="btn" onclick="loadStats()">🔄 새로고침</button>
-            <button class="btn chart-toggle active" id="dailyChartBtn" onclick="showDailyChart()">📈 일별 차트</button>
-            <button class="btn chart-toggle" id="monthlyChartBtn" onclick="showMonthlyChart()">📅 월별 차트</button>
             <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
         </div>
         
         <!-- 상단 섹션: 오늘 요약 + 사용자 목록 -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
-            <div class="stats-section">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; align-items: start;">
+            <div class="stats-section" style="height: 420px;">
                 <h2 class="section-title">📋 오늘 요약</h2>
-                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(2, 1fr);">
+                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(2, 1fr); height: 350px; align-content: start;">
                     <div class="loading">통계 로딩 중...</div>
                 </div>
             </div>
             
-            <div class="stats-section">
+            <div class="stats-section" style="height: 420px;">
                 <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
-                <div class="user-table">
+                <div class="user-table" style="height: 350px; display: flex; flex-direction: column;">
                     <div class="table-header">
                         총 사용자: <span id="totalUsers">-</span>명
                     </div>
-                    <div class="table-content" id="userTable" style="max-height: 350px;">
+                    <div class="table-content" id="userTable" style="flex: 1; overflow-y: auto;">
                         <div class="loading">사용자 데이터 로딩 중...</div>
                     </div>
                 </div>
             </div>
         </div>
         
-        <div class="stats-section">
-            <h2 class="section-title" id="chartTitle">📈 일별 접속 트렌드 (시각적 차트)</h2>
-            <div class="chart-container">
-                <div class="chart-wrapper">
-                    <canvas id="trendChart"></canvas>
+        <!-- 차트 섹션: 일별 + 월별 트렌드 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+            <div class="stats-section">
+                <h2 class="section-title">📈 일별 접속 트렌드 (최근 14일)</h2>
+                <div class="chart-container" style="margin-bottom: 0;">
+                    <div class="chart-wrapper" style="height: 300px;">
+                        <canvas id="dailyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="stats-section">
+                <h2 class="section-title">📅 월별 접속 트렌드 (최근 6개월)</h2>
+                <div class="chart-container" style="margin-bottom: 0;">
+                    <div class="chart-wrapper" style="height: 300px;">
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -378,8 +388,8 @@
     </div>
 
     <script>
-        let currentChart = null;
-        let currentView = 'daily';
+        let dailyChart = null;
+        let monthlyChart = null;
         let trendData = null;
         let monthlyData = null;
         
@@ -401,12 +411,9 @@
                 renderDailyStats(dailyData);
                 renderUserTable(usersData.users);
                 
-                // 현재 보기에 따라 차트 렌더링
-                if (currentView === 'daily') {
-                    showDailyChart();
-                } else {
-                    showMonthlyChart();
-                }
+                // 두 차트 모두 렌더링
+                renderDailyChart();
+                renderMonthlyChart();
                 
                 document.getElementById('totalUsers').textContent = usersData.total_users;
                 
@@ -438,13 +445,15 @@
             `;
         }
         
-        function showDailyChart() {
-            currentView = 'daily';
-            document.getElementById('chartTitle').textContent = '📈 일별 접속 트렌드 (최근 14일)';
-            document.getElementById('dailyChartBtn').classList.add('active');
-            document.getElementById('monthlyChartBtn').classList.remove('active');
-            
+        function renderDailyChart() {
             if (!trendData) return;
+            
+            const ctx = document.getElementById('dailyChart');
+            
+            // 기존 차트 삭제
+            if (dailyChart) {
+                dailyChart.destroy();
+            }
             
             // 차트 데이터 준비
             const sortedDates = Object.keys(trendData).sort();
@@ -453,42 +462,50 @@
             const newUsers = sortedDates.map(date => trendData[date].new_users);
             const totalRequests = sortedDates.map(date => trendData[date].total_requests);
             
-            renderChart({
-                labels: labels,
-                datasets: [
-                    {
-                        label: '활성 사용자',
-                        data: activeUsers,
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        tension: 0.4
-                    },
-                    {
-                        label: '신규 사용자',
-                        data: newUsers,
-                        borderColor: '#2196F3',
-                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                        tension: 0.4
-                    },
-                    {
-                        label: '총 요청 수',
-                        data: totalRequests,
-                        borderColor: '#FF9800',
-                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                        yAxisID: 'y1',
-                        tension: 0.4
-                    }
-                ]
-            }, 'daily');
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '활성 사용자',
+                            data: activeUsers,
+                            borderColor: '#4CAF50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: '신규 사용자',
+                            data: newUsers,
+                            borderColor: '#2196F3',
+                            backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: '총 요청 수',
+                            data: totalRequests,
+                            borderColor: '#FF9800',
+                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                            yAxisID: 'y1',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: getChartOptions('일별')
+            });
         }
         
-        function showMonthlyChart() {
-            currentView = 'monthly';
-            document.getElementById('chartTitle').textContent = '📅 월별 접속 트렌드 (최근 6개월)';
-            document.getElementById('monthlyChartBtn').classList.add('active');
-            document.getElementById('dailyChartBtn').classList.remove('active');
-            
+        function renderMonthlyChart() {
             if (!monthlyData) return;
+            
+            const ctx = document.getElementById('monthlyChart');
+            
+            // 기존 차트 삭제
+            if (monthlyChart) {
+                monthlyChart.destroy();
+            }
             
             // 차트 데이터 준비
             const sortedMonths = Object.keys(monthlyData).sort();
@@ -497,117 +514,125 @@
             const newUsers = sortedMonths.map(month => monthlyData[month].new_users);
             const totalRequests = sortedMonths.map(month => monthlyData[month].total_requests);
             
-            renderChart({
-                labels: labels,
-                datasets: [
-                    {
-                        label: '활성 사용자',
-                        data: activeUsers,
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
-                        fill: true,
-                        tension: 0.4
-                    },
-                    {
-                        label: '신규 사용자',
-                        data: newUsers,
-                        borderColor: '#2196F3',
-                        backgroundColor: 'rgba(33, 150, 243, 0.2)',
-                        fill: true,
-                        tension: 0.4
-                    },
-                    {
-                        label: '총 요청 수',
-                        data: totalRequests,
-                        borderColor: '#FF9800',
-                        backgroundColor: 'rgba(255, 152, 0, 0.2)',
-                        yAxisID: 'y1',
-                        fill: true,
-                        tension: 0.4
-                    }
-                ]
-            }, 'monthly');
-        }
-        
-        function renderChart(data, type) {
-            const ctx = document.getElementById('trendChart');
-            
-            // 기존 차트 삭제
-            if (currentChart) {
-                currentChart.destroy();
-            }
-            
-            currentChart = new Chart(ctx, {
-                type: 'line',
-                data: data,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            labels: {
-                                color: '#ffffff'
-                            }
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: 'rgba(26, 26, 46, 0.9)',
-                            titleColor: '#4CAF50',
-                            bodyColor: '#ffffff',
+            monthlyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '활성 사용자',
+                            data: activeUsers,
+                            backgroundColor: 'rgba(76, 175, 80, 0.8)',
                             borderColor: '#4CAF50',
                             borderWidth: 1
-                        }
-                    },
-                    scales: {
-                        x: {
-                            ticks: {
-                                color: '#aaaaaa'
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            }
                         },
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            ticks: {
-                                color: '#aaaaaa'
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            },
-                            title: {
-                                display: true,
-                                text: '사용자 수',
-                                color: '#4CAF50'
-                            }
+                        {
+                            label: '신규 사용자',
+                            data: newUsers,
+                            backgroundColor: 'rgba(33, 150, 243, 0.8)',
+                            borderColor: '#2196F3',
+                            borderWidth: 1
                         },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            ticks: {
-                                color: '#aaaaaa'
-                            },
-                            grid: {
-                                drawOnChartArea: false,
-                            },
-                            title: {
-                                display: true,
-                                text: '요청 수',
-                                color: '#FF9800'
-                            }
+                        {
+                            label: '총 요청 수',
+                            data: totalRequests,
+                            backgroundColor: 'rgba(255, 152, 0, 0.8)',
+                            borderColor: '#FF9800',
+                            borderWidth: 1,
+                            yAxisID: 'y1'
                         }
-                    },
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
-                    }
-                }
+                    ]
+                },
+                options: getChartOptions('월별')
             });
+        }
+        
+        function getChartOptions(type) {
+            return {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#ffffff',
+                            font: {
+                                size: 11
+                            }
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(26, 26, 46, 0.9)',
+                        titleColor: '#4CAF50',
+                        bodyColor: '#ffffff',
+                        borderColor: '#4CAF50',
+                        borderWidth: 1
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            color: '#aaaaaa',
+                            font: {
+                                size: 10
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        ticks: {
+                            color: '#aaaaaa',
+                            font: {
+                                size: 10
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        title: {
+                            display: true,
+                            text: '사용자 수',
+                            color: '#4CAF50',
+                            font: {
+                                size: 11
+                            }
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        ticks: {
+                            color: '#aaaaaa',
+                            font: {
+                                size: 10
+                            }
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                        title: {
+                            display: true,
+                            text: '요청 수',
+                            color: '#FF9800',
+                            font: {
+                                size: 11
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            };
         }
         
         function renderUserTable(users) {

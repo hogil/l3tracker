@@ -335,9 +335,24 @@ class WaferMapViewer {
         this.userName = localStorage.getItem('l3tracker_username') || '';
     }
     
-    setupUserName() {
+    async setupUserName() {
         const userNameInput = document.getElementById('user-name-input');
         if (userNameInput) {
+            // 시스템 사용자 이름 자동 가져오기
+            if (!this.userName) {
+                try {
+                    const response = await fetch('/api/get-system-username');
+                    const data = await response.json();
+                    if (data.system_username) {
+                        this.userName = data.system_username;
+                        localStorage.setItem('l3tracker_username', this.userName);
+                        console.log(`Windows 계정 자동 감지: ${this.userName}`);
+                    }
+                } catch (error) {
+                    console.log('시스템 사용자 이름 자동 감지 실패:', error);
+                }
+            }
+            
             // 저장된 사용자 이름 로드
             userNameInput.value = this.userName;
             
@@ -356,7 +371,7 @@ class WaferMapViewer {
                 }
             });
             
-            // 초기 서버 전송 (기존 사용자인 경우)
+            // 초기 서버 전송
             if (this.userName) {
                 this.sendUserNameToServer();
             }

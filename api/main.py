@@ -1327,6 +1327,37 @@ async def get_user_detail(user_id: str):
 class SetUsernameRequest(BaseModel):
     username: str
 
+@app.get("/api/get-system-username")
+async def get_system_username(http_request: Request):
+    """시스템 사용자 이름 추출 (Windows 계정 등)"""
+    try:
+        import os
+        import getpass
+        import socket
+        
+        # 현재 사용자 ID 생성
+        client_ip = logger_instance.get_client_ip(http_request)
+        user_agent = http_request.headers.get("user-agent", "Unknown")
+        user_id = logger_instance.generate_user_id(client_ip, user_agent)
+        
+        # 시스템 정보 추출
+        system_username = getpass.getuser()  # Windows 계정명
+        hostname = socket.gethostname()
+        
+        # 자동으로 사용자 이름 설정
+        if system_username and system_username != "Unknown":
+            logger_instance.set_user_display_name(user_id, system_username)
+        
+        return {
+            "user_id": user_id,
+            "system_username": system_username,
+            "hostname": hostname,
+            "ip": client_ip
+        }
+    except Exception as e:
+        logger.error(f"시스템 사용자 이름 추출 실패: {e}")
+        return {"user_id": "", "system_username": "", "hostname": "", "ip": ""}
+
 @app.post("/api/set-username")
 async def set_username(request: SetUsernameRequest, http_request: Request):
     """사용자 이름 설정"""
