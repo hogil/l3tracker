@@ -220,13 +220,13 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             
             # stats 엔드포인트는 로그 완전 제한 (자동 폴링 방지)
             if endpoint.startswith('/api/stats/'):
-                print(f"DEBUG: stats 엔드포인트 감지됨: {endpoint}")
+                print(f"🚫 STATS 차단: {endpoint}")
                 # stats는 로그 없이 바로 반환
                 return response
             
             # stats 관련 모든 엔드포인트 차단
             if 'stats' in endpoint:
-                print(f"DEBUG: stats 관련 엔드포인트 감지됨: {endpoint}")
+                print(f"🚫 STATS 차단: {endpoint}")
                 return response
             # 사용자 액션이 아닌 경우만 빈도 제한 적용
             elif log_type not in ['ACTION', 'IMAGE']:
@@ -1437,6 +1437,12 @@ async def browse_folders(path: Optional[str] = None):
 
 if __name__ == "__main__":
     import uvicorn
+    print("🚀 L3Tracker 서버 시작 중...")
+    print(f"📍 호스트: {config.DEFAULT_HOST}")
+    print(f"🔌 포트: {config.DEFAULT_PORT}")
+    print(f"📁 루트 디렉토리: {config.ROOT_DIR}")
+    print("=" * 50)
+    
     uvicorn.run(
         app,
         host=config.DEFAULT_HOST,
