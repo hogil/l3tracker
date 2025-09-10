@@ -342,8 +342,8 @@
             <div class="stats-section">
                 <h2 class="section-title">👥 사용자 목록 (활동량 순)</h2>
                 <div class="user-table" style="height: 300px; display: flex; flex-direction: column;">
-                    <div class="table-header" style="flex-shrink: 0;">
-                        총 사용자: <span id="totalUsers">-</span>명
+                    <div class="table-header" style="flex-shrink: 0; padding: 8px 12px; background: #333; font-size: 0.9em; border-radius: 4px; margin-bottom: 8px;">
+                        총 사용자: <span id="totalUsers" style="color: #4CAF50; font-weight: bold;">-</span>명
                     </div>
                     <div class="table-content" id="userTable" style="flex: 1; overflow-y: auto;">
                         <div class="loading">사용자 데이터 로딩 중...</div>
@@ -354,8 +354,8 @@
             <div class="stats-section">
                 <h2 class="section-title">🕐 최근 사용자 (24시간)</h2>
                 <div class="user-table" style="height: 300px; display: flex; flex-direction: column;">
-                    <div class="table-header" style="flex-shrink: 0;">
-                        최근 활동: <span id="recentUsersCount">-</span>명
+                    <div class="table-header" style="flex-shrink: 0; padding: 8px 12px; background: #333; font-size: 0.9em; border-radius: 4px; margin-bottom: 8px;">
+                        최근 활동: <span id="recentUsersCount" style="color: #FF9800; font-weight: bold;">-</span>명
                     </div>
                     <div class="table-content" id="recentUserTable" style="flex: 1; overflow-y: auto;">
                         <div class="loading">최근 사용자 로딩 중...</div>
@@ -660,27 +660,26 @@
             }
             
             let html = `
-                <div class="user-row" style="background: #333; font-weight: bold; grid-template-columns: 1fr 100px 80px 80px;">
-                    <div>사용자 (ID / IP)</div>
-                    <div>총 요청</div>
-                    <div>접속일</div>
-                    <div>최근접속</div>
+                <div style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 8px 12px; background: #333; font-weight: bold; font-size: 0.85em; border-radius: 4px; margin-bottom: 4px;">
+                    <div>사용자 (ID/IP)</div>
+                    <div style="text-align: center;">요청수</div>
+                    <div style="text-align: center;">접속일</div>
+                    <div style="text-align: center;">최근접속</div>
                 </div>
             `;
             
             users.forEach(user => {
-                // 사용자 이름 우선 표시 (ID는 표시하지 않음)
                 const displayName = user.display_name || "Anonymous";
                 
                 html += `
-                    <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')" style="grid-template-columns: 1fr 100px 80px 80px;">
-                        <div>
-                            <div class="user-id" style="margin-bottom: 2px; color: #4CAF50; font-weight: bold;">${displayName}</div>
-                            <div class="ip-address" style="font-size: 0.8rem;">${user.primary_ip}</div>
+                    <div class="clickable" onclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="overflow: hidden;">
+                            <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
+                            <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
                         </div>
-                        <div style="text-align: center; font-weight: bold; color: #FF9800;">${user.total_requests}</div>
+                        <div style="text-align: center; color: #FF9800; font-weight: bold;">${user.total_requests}</div>
                         <div style="text-align: center; color: #2196F3;">${user.unique_days}일</div>
-                        <div style="text-align: center; font-size: 0.9rem;">${formatDate(user.last_seen)}</div>
+                        <div style="text-align: center; font-size: 0.8em; color: #ccc;">${formatDate(user.last_seen)}</div>
                     </div>
                 `;
             });
@@ -697,10 +696,10 @@
             }
             
             let html = `
-                <div class="user-row" style="background: #333; font-weight: bold; grid-template-columns: 1fr 80px 120px;">
-                    <div>사용자 (ID / IP)</div>
-                    <div>요청수</div>
-                    <div>마지막 접속</div>
+                <div style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 8px 12px; background: #333; font-weight: bold; font-size: 0.85em; border-radius: 4px; margin-bottom: 4px;">
+                    <div>사용자 (ID/IP)</div>
+                    <div style="text-align: center;">요청수</div>
+                    <div style="text-align: center;">마지막 접속</div>
                 </div>
             `;
             
@@ -714,12 +713,12 @@
                 });
                 
                 html += `
-                    <div class="user-row clickable" onclick="showUserDetail('${user.user_id}')" style="grid-template-columns: 1fr 80px 120px;">
-                        <div>
-                            <div class="user-id" style="margin-bottom: 2px; color: #4CAF50; font-weight: bold;">${displayName}</div>
-                            <div class="user-ip" style="font-size: 0.8em; color: #888;">${user.primary_ip}</div>
+                    <div class="clickable" onclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
+                        <div style="overflow: hidden;">
+                            <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
+                            <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
                         </div>
-                        <div style="text-align: center; color: #FFA726;">${user.total_requests}</div>
+                        <div style="text-align: center; color: #FFA726; font-weight: bold;">${user.total_requests}</div>
                         <div style="text-align: center; font-size: 0.8em; color: #81C784;">${lastAccess}</div>
                     </div>
                 `;
