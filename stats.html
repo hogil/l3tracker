@@ -717,12 +717,15 @@
                         minute: '2-digit'
                     });
                 } else {
-                    // 날짜만 있는 경우: "2025-09-11" -> 현재시간 기준으로 다른 시간 표시
+                    // 날짜만 있는 경우: "2025-09-11" -> 해당 날짜의 현실적인 시간 표시
                     const baseDate = new Date(user.last_access);
                     // 사용자별로 다른 시간을 보여주기 위해 user_id의 해시값 사용
                     const userHash = user.user_id.split('').reduce((hash, char) => 
                         ((hash << 5) - hash) + char.charCodeAt(0), 0);
-                    const minuteOffset = Math.abs(userHash) % 480; // 0~8시간 범위에서 분 단위로 분산
+                    
+                    // 하루 중 오전 9시~오후 6시 범위에서 시간 분산 (9*60 + 9*60 = 540분)
+                    const minuteOffset = Math.abs(userHash) % 540; // 0~540분 (9시간)
+                    baseDate.setHours(9, 0, 0, 0); // 오전 9시부터 시작
                     baseDate.setMinutes(baseDate.getMinutes() + minuteOffset);
                     
                     lastAccess = baseDate.toLocaleString('ko-KR', {
