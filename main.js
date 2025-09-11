@@ -3251,10 +3251,17 @@ class WaferMapViewer {
                         }, 200);
                         return;
                     }
-                    // 단일 이미지 모드: 현재 표시된 이미지에 라벨링 (selectedImagePath가 있는 경우)
-                    if (!this.gridMode && this.selectedImagePath) {
+                    // 단일 이미지 모드: 현재 표시된 이미지에 라벨링
+                    if (!this.gridMode && (this.selectedImagePath || this.currentImage)) {
                         this.selectedClass = cls;
                         if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
+                        
+                        console.log('단일 이미지 모드 라벨링:', { 
+                            selectedImagePath: this.selectedImagePath, 
+                            currentImage: !!this.currentImage,
+                            gridMode: this.gridMode 
+                        });
+                        
                         await this.labelImage();
                         const originalBg = btn.style.background;
                         btn.style.background = '#2ecc40';
