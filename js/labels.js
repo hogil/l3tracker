@@ -391,6 +391,11 @@ export class LabelManager {
         // 기존 선택 해제
         this.labelSelection.selectedClasses = [className];
         this.showClassImages(className);
+        
+        // 단일 이미지 뷰에서 클래스 선택 시 라벨 추가 모달 열기
+        if (this.viewer && this.viewer.isSingleImageMode && this.viewer.currentImagePath) {
+            this.openAddLabelModal();
+        }
     }
     
     /**

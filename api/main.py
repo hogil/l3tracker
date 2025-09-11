@@ -56,7 +56,7 @@ logger = logging.getLogger("l3tracker")
 # 컬럼폭은 화면폭 기준으로 조정. PATH/NOTE 넉넉히 줌.
 ACCESS_TABLE_COLOR = os.getenv("ACCESS_TABLE_COLOR", "1") != "0"  # 0이면 색 끔
 ACCESS_TABLE_WIDTHS = [
-    ("TAG", 7), ("TIME", 25), ("IP", 18), ("METHOD", 6), ("STS", 5), ("PATH", 24), ("NOTE", 48)
+    ("TAG", 7), ("TIME", 35), ("IP", 20), ("METHOD", 6), ("STS", 8), ("PATH", 24), ("NOTE", 50)
 ]
 
 def _ansi(code: str) -> str:
@@ -157,16 +157,23 @@ def log_access_row(*, tag: str, ip: str = "-", method: str = "-", status: int = 
     global _access_count
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1) 평문 셀 만들기
-    plain_cells = {
-        "TAG":    _pad_plain(tag, 7),
-        "TIME":   _pad_plain(ts, 19),
-        "IP":     _pad_plain(ip, 15),
-        "METHOD": _pad_plain((method or "").upper(), 6),
-        "STS":    _pad_plain(str(status), 3),
-        "PATH":   _pad_plain(path, 24),
-        "NOTE":   _pad_plain(note, 50),
-    }
+    # 1) 평문 셀 만들기 (ACCESS_TABLE_WIDTHS 사용)
+    plain_cells = {}
+    for col_name, width in ACCESS_TABLE_WIDTHS:
+        if col_name == "TAG":
+            plain_cells[col_name] = _pad_plain(tag, width)
+        elif col_name == "TIME":
+            plain_cells[col_name] = _pad_plain(ts, width)
+        elif col_name == "IP":
+            plain_cells[col_name] = _pad_plain(ip, width)
+        elif col_name == "METHOD":
+            plain_cells[col_name] = _pad_plain((method or "").upper(), width)
+        elif col_name == "STS":
+            plain_cells[col_name] = _pad_plain(str(status), width)
+        elif col_name == "PATH":
+            plain_cells[col_name] = _pad_plain(path, width)
+        elif col_name == "NOTE":
+            plain_cells[col_name] = _pad_plain(note, width)
 
     # 2) 색상 적용(중요도 높은 것만)
     tag_col = f"{_color_for_tag(tag)}{plain_cells['TAG']}{CLR['reset']}"
@@ -510,9 +517,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = DIRLIST_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:

@@ -2861,6 +2861,7 @@ class WaferMapViewer {
             const blob = await fetch(`/api/image?path=${encodeURIComponent(path)}`).then(r => r.blob());
             this.currentImageBitmap = await createImageBitmap(blob);
             this.currentImage = this.currentImageBitmap;
+            this.selectedImagePath = path; // 단일 이미지 모드를 위한 경로 설정
             this.resetView(false);
             this.dom.minimapContainer.style.display = 'block';
             this.dom.imageCanvas.style.display = 'block';
@@ -3233,8 +3234,40 @@ class WaferMapViewer {
                         }, 200);
                         return;
                     }
-                    // 단일 이미지 모드: 기존 동작 유지
-                    if (this.selectedImagePath) {
+                    // 단일 이미지 모드: 현재 표시된 이미지에 라벨링
+                    if (!this.gridMode && this.currentImageIndex !== -1 && this.selectedImages[this.currentImageIndex]) {
+                        this.selectedClass = cls;
+                        if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
+                        
+                        // 현재 표시된 이미지의 경로 사용
+                        const currentImagePath = this.selectedImages[this.currentImageIndex];
+                        const requestBody = { class_name: cls, image_path: currentImagePath };
+                        console.log('단일 이미지 분류 요청 전송:', requestBody);
+                        
+                        const response = await fetch('/api/classify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error('분류 실패:', response.status, errorText);
+                        }
+                        
+                        // 버튼 색상 피드백
+                        const originalBg = btn.style.background;
+                        btn.style.background = '#2ecc40';
+                        setTimeout(() => {
+                            btn.style.background = originalBg;
+                            this.refreshLabelExplorer();
+                            // 추가로 강제 새로고침
+                            setTimeout(() => this.refreshLabelExplorer(), 100);
+                        }, 200);
+                        return;
+                    }
+                    // 기존 단일 이미지 모드 처리 (selectedImagePath가 있는 경우)
+                    else if (this.selectedImagePath) {
                         this.selectedClass = cls;
                         if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
                         await this.labelImage();
