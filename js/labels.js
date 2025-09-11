@@ -434,7 +434,7 @@ export class LabelManager {
             }
             
             const data = await response.json();
-            const images = data.images || [];
+            const images = data.results || [];
             
             // 제목 업데이트
             if (this.elements.classImagesTitle) {

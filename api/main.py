@@ -510,7 +510,7 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
 
     key = str(target)
     if should_cache:
-        cached = DIRLIST_CACHE.get(key)
+    cached = DIRLIST_CACHE.get(key)
     if cached is not None:
         return cached
 
