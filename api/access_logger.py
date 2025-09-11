@@ -211,19 +211,19 @@ class AccessLogger:
         # 추가 정보가 있으면 표시
         extra_part = f" {extra_info}" if extra_info else ""
         
-        # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 보정
-        # 색상 코드 길이를 고려한 정렬
+        # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 정확히 계산
+        # 색상 코드 길이: \033[XXm = 5자리, \033[0m = 4자리
         type_with_color = f"{type_color}{log_type}\033[0m"
         ip_with_color = f"\033[90m{ip_col}\033[0m"
         method_with_color = f"{method_color}{method_col}\033[0m"
         status_with_color = f"{status_color}{status_col}\033[0m"
         
-        # 🎯 완벽한 테이블 정렬 - 모든 타입이 동일한 위치에 정렬
-        # 타입별로 글자 수가 달라도 시간/IP/GET 시작 위치가 동일하게
-        type_padded = f"{type_with_color:<15}"  # 색상코드 포함 15자리 (API, IMAGE, PAGE 모두 동일)
-        ip_padded = f"{ip_with_color:<20}"      # 색상코드 포함 20자리  
-        method_padded = f"{method_with_color:<9}"  # 색상코드 포함 9자리
-        status_padded = f"{status_with_color:>8}"  # 색상코드 포함 8자리 (우측정렬)
+        # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 보정
+        # 실제 텍스트 길이만 고려하여 정렬 (색상 코드는 무시)
+        type_padded = f"{type_with_color:<8}"   # API(3) + 색상코드(9) = 8자리
+        ip_padded = f"{ip_with_color:<20}"      # IP(15) + 색상코드(9) = 20자리  
+        method_padded = f"{method_with_color:<8}"  # GET(3) + 색상코드(9) = 8자리
+        status_padded = f"{status_with_color:>6}"  # 200(3) + 색상코드(9) = 6자리 (우측정렬)
         
         # 🎯 완벽한 정렬 - 모든 컬럼이 고정 위치에
         message = (
@@ -232,7 +232,7 @@ class AccessLogger:
             f"{endpoint_col}  {status_padded}{extra_part}"  # 엔드포인트-상태 간 여백 2칸
         )
         
-        # 콘솔에 테이블 형식으로 출력
+        # 콘솔에 테이블 형식으로 출력 (중복 방지)
         print(message)
         
         # 파일에는 단순한 형식으로 저장
