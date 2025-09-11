@@ -286,6 +286,7 @@ class WaferMapViewer {
             filePathText: document.getElementById('file-path-text'),
             subfolderSelect: document.getElementById('subfolder-select'),
             browseFolderBtn: document.getElementById('browse-folder-btn'),
+            refreshBtn: document.getElementById('refresh-btn'),
             addClassBtn: document.getElementById('add-class-btn'),
             newClassInput: document.getElementById('new-class-input'),
             classList: document.getElementById('class-list'),
@@ -3145,6 +3146,7 @@ class WaferMapViewer {
         // 폴더 관련 이벤트 리스너
         this.dom.subfolderSelect.addEventListener('change', (e) => this.onSubfolderSelect(e));
         this.dom.browseFolderBtn.addEventListener('click', () => this.showFolderBrowser());
+        this.dom.refreshBtn.addEventListener('click', () => this.refreshAll());
         
         // 폴더 브라우저 모달 이벤트
         this.setupFolderBrowserEvents();
@@ -3291,6 +3293,22 @@ class WaferMapViewer {
         
         // 스크롤 위치 복원
         if (container) container.scrollTop = scrollTop;
+    }
+
+    // 전체 새로고침 함수
+    async refreshAll() {
+        console.log('전체 새로고침 시작...');
+        try {
+            // 현재 폴더 다시 로드
+            await this.loadFiles();
+            // 클래스 목록 새로고침
+            await this.refreshClassList();
+            // 라벨 탐색기 새로고침
+            await this.refreshLabelExplorer();
+            console.log('전체 새로고침 완료');
+        } catch (error) {
+            console.error('전체 새로고침 실패:', error);
+        }
     }
 
     updateClassListSelection() {

@@ -151,7 +151,8 @@ def _note_from_request(request: Request, endpoint: str) -> str:
         return "[클래스]"
     return ""
 
-def log_access_row(*, tag: str, ip: str, method: str, status: int, path: str, note: str = ""):
+def log_access_row(*, tag: str, ip: str = "-", method: str = "-", status: int = 0,
+                   path: str = "-", note: str = ""):
     """ANSI 길이를 무시하고 고정폭 정렬: 먼저 평문 패딩 → 그 위에 색 입힘."""
     global _access_count
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -326,8 +327,8 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         method = request.method
         status = response.status_code
 
-        # 제외 경로
-        skip_prefix = ["/favicon.ico", "/static/", "/js/", "/api/files/all", "/api/stats", "/api/stats/"]
+        # 제외 경로 (통계 기록도 제외)
+        skip_prefix = ["/favicon.ico", "/static/", "/js/", "/api/files/all", "/api/stats", "/api/stats/", "/stats"]
         if any(endpoint.startswith(p) for p in skip_prefix):
             return response
 
@@ -338,6 +339,12 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             tag = "ACTION"
         else:
             tag = "API"
+
+        # 통계 업데이트 (새로 추가)
+        try:
+            logger_instance._update_stats(client_ip, endpoint, method)
+        except Exception as e:
+            print(f"DEBUG: 통계 업데이트 실패: {e}")
 
         # 내부 통계만 기록(콘솔은 우리가 처리)
         try:
@@ -450,25 +457,35 @@ def _remove_label_from_all_images(label_name: str) -> int:
                 removed += 1
     if removed:
         _labels_save()
-        logger.info(f"라벨 완전 삭제: '{label_name}' → {removed}개 이미지에서 제거")
+        log_access_row(tag="INFO", note=f"라벨 완전 삭제: '{label_name}' → {removed}개 이미지에서 제거")
     return removed
 
 # ----- labels file I/O -----
 def _labels_load():
     global LABELS, LABELS_MTIME
     if not LABELS_FILE.exists():
-        with LABELS_LOCK: LABELS = {}
-        LABELS_MTIME = 0.0;  return
+        with LABELS_LOCK:
+            LABELS = {}
+        LABELS_MTIME = 0.0
+        return
     try:
         with LABELS_LOCK:
             with open(LABELS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             LABELS = {k: [str(x) for x in v] for k, v in data.items() if isinstance(v, list)}
-        try: LABELS_MTIME = LABELS_FILE.stat().st_mtime
-        except Exception: LABELS_MTIME = time.time()
-        logger.info(f"라벨 로드: {len(LABELS)}개 이미지 (mtime={LABELS_MTIME})")
+        try:
+            LABELS_MTIME = LABELS_FILE.stat().st_mtime
+        except Exception:
+            LABELS_MTIME = time.time()
+
+        # ✅ 여기서 일반 logger.info 대신 표 형식 로그 출력
+        log_access_row(
+            tag="INFO",
+            note=f"라벨 로드: {len(LABELS)}개 이미지 (mtime={LABELS_MTIME:.5f})"
+        )
     except Exception as e:
         logger.error(f"라벨 로드 실패: {e}")
+
 
 def _labels_save():
     global LABELS_MTIME
@@ -479,8 +496,10 @@ def _labels_save():
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(LABELS, f, ensure_ascii=False, indent=2)
             os.replace(tmp, LABELS_FILE)
-        try: LABELS_MTIME = LABELS_FILE.stat().st_mtime
-        except Exception: LABELS_MTIME = time.time()
+        try: 
+            LABELS_MTIME = LABELS_FILE.stat().st_mtime
+        except Exception: 
+            LABELS_MTIME = time.time()
     except Exception as e:
         logger.error(f"라벨 저장 실패: {e}")
         raise HTTPException(status_code=500, detail="Failed to save labels")
@@ -516,7 +535,7 @@ async def build_file_index_background():
     global INDEX_BUILDING, INDEX_READY
     if INDEX_BUILDING: return
     INDEX_BUILDING, INDEX_READY = True, False
-    logging.getLogger("uvicorn.error").info("백그라운드 인덱스 구축 시작")
+    log_access_row(tag="INFO", note="백그라운드 인덱스 구축 시작")
 
     def _walk_and_index():
         global INDEX_READY
@@ -538,7 +557,8 @@ async def build_file_index_background():
                     continue
             time.sleep(0.001)
         INDEX_READY = True
-        logging.getLogger("uvicorn.error").info(f"인덱스 구축 완료: {len(FILE_INDEX)}개, {time.time()-start:.1f}s")
+        elapsed = time.time() - start
+        log_access_row(tag="INFO", note=f"인덱스 구축 완료: {len(FILE_INDEX)}개, {elapsed:.1f}s")
 
     try:
         await asyncio.get_running_loop().run_in_executor(ThreadPoolExecutor(max_workers=1), _walk_and_index)
@@ -730,7 +750,7 @@ async def get_classes(_=Depends(labels_classes_sync_dep)):
         _dircache_invalidate(classification_dir)
         if not classification_dir.exists():
             classification_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"classification 폴더 생성: {classification_dir}")
+            log_access_row(tag="INFO", note=f"classification 폴더 생성: {classification_dir}")
             return {"success": True, "classes": []}
         classes = []
         try:
@@ -759,7 +779,7 @@ async def create_class(req: CreateClassReq, _=Depends(labels_classes_sync_dep)):
         _sync_labels_if_classes_changed()
         for p in (_classification_dir(), class_dir, ROOT_DIR): _dircache_invalidate(p)
         DIRLIST_CACHE.clear()
-        logger.info(f"클래스 '{name}' 생성 완료 - Label Explorer 새로고침 필요")
+        log_access_row(tag="INFO", note=f"클래스 '{name}' 생성 완료")
         return {"success": True, "class": name, "refresh_required": True, "message": f"클래스 '{name}' 생성됨"}
     except Exception as e:
         logger.exception(f"클래스 생성 실패: {e}")
@@ -774,15 +794,17 @@ async def delete_class(class_name: str = PathParam(..., min_length=1, max_length
         class_dir = _classification_dir() / class_name
         if not class_dir.exists() or not class_dir.is_dir(): raise HTTPException(status_code=404, detail="Class not found")
         if force:
-            shutil.rmtree(class_dir); logger.info(f"클래스 삭제(force): {class_name}")
+            shutil.rmtree(class_dir)
+            log_access_row(tag="INFO", note=f"클래스 삭제(force): {class_name}")
         else:
             if any(class_dir.iterdir()): raise HTTPException(status_code=409, detail="Class directory not empty")
-            class_dir.rmdir(); logger.info(f"클래스 삭제: {class_name}")
+            class_dir.rmdir()
+            log_access_row(tag="INFO", note=f"클래스 삭제: {class_name}")
         removed_cnt = _remove_label_from_all_images(class_name)
         _labels_load()
         for p in (_classification_dir(), class_dir, ROOT_DIR): _dircache_invalidate(p)
         DIRLIST_CACHE.clear()
-        logger.info(f"클래스 '{class_name}' 삭제 완료 - Label Explorer 새로고침 필요")
+        log_access_row(tag="INFO", note=f"클래스 '{class_name}' 삭제 완료")
         return {"success": True, "deleted": class_name, "force": force, "labels_cleaned": removed_cnt, "refresh_required": True}
     except Exception as e:
         logger.exception(f"클래스 삭제 실패: {e}")
@@ -809,7 +831,7 @@ async def delete_classes(req: DeleteClassesReq, _=Depends(labels_classes_sync_de
                 logger.exception(f"클래스 {class_name} 삭제 실패: {e}")
         if total_cleaned > 0: _labels_load()
         _dircache_invalidate(_classification_dir())
-        logger.info("배치 클래스 삭제 완료 - Label Explorer 새로고침 필요")
+        log_access_row(tag="INFO", note="배치 클래스 삭제 완료 - Label Explorer 새로고침 필요")
         return {"success": True, "deleted": deleted, "failed": failed, "labels_cleaned": total_cleaned,
                 "refresh_required": True, "message": f"{len(deleted)}개 삭제, {len(failed)}개 실패"}
     except Exception as e:
@@ -903,7 +925,7 @@ async def classify_image(req: ClassifyRequest, _=Depends(labels_classes_sync_dep
             if rel not in LABELS: LABELS[rel] = []
             if class_name not in LABELS[rel]: LABELS[rel].append(class_name)
         _labels_save();  _dircache_invalidate(_classification_dir()); _dircache_invalidate(class_dir)
-        logger.info(f"이미지 분류: {image_path} -> {class_name}")
+        log_access_row(tag="INFO", note=f"이미지 분류: {image_path} -> {class_name}")
         return {"success": True, "message": f"이미지 '{image_path}'이 클래스 '{class_name}'으로 분류되었습니다",
                 "image": rel, "class": class_name}
     except Exception as e:
@@ -971,6 +993,11 @@ async def get_user_detail(user_id: str):
     if user_detail is None: raise HTTPException(status_code=404, detail="User not found")
     return user_detail
 
+@app.get("/api/stats/active-users")
+async def get_active_users():
+    """현재 활성 사용자 목록"""
+    return logger_instance.get_active_users()
+
 # ---------------- Static / Pages ----------------
 app.mount("/js", StaticFiles(directory="js"), name="js")
 app.mount("/static", StaticFiles(directory="."), name="static")
@@ -1034,7 +1061,7 @@ async def change_folder(request: Request):
         classification_dir = _classification_dir()
         if not classification_dir.exists():
             classification_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"새 폴더의 classification 폴더 생성: {classification_dir}")
+            log_access_row(tag="INFO", note=f"새 폴더의 classification 폴더 생성: {classification_dir}")
 
         _labels_load()
         return {"success": True, "message": f"폴더가 '{new_path}'로 변경되었습니다", "new_path": str(ROOT_DIR)}

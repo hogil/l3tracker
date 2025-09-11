@@ -36,6 +36,8 @@ class AccessLogger:
     def __init__(self):
         self.stats_data: Dict[str, Any] = self._load_stats()
         self.recent_api_calls: Dict[str, float] = {}  # IP+endpoint -> timestamp 매핑
+        self.active_sessions: Dict[str, Dict[str, Any]] = {}  # IP -> 세션 정보
+        self.session_timeout = 300  # 5분 (초) - 테스트용으로 짧게 설정
     
     def _load_stats(self) -> Dict[str, Any]:
         """통계 데이터 로드"""
@@ -293,10 +295,38 @@ class AccessLogger:
         return False
     
     def _update_stats(self, ip: str, endpoint: str, method: str):
-        """통계 업데이트"""
+        """통계 업데이트 - 세션 관리 포함"""
+        # localhost IP 제외
+        if ip in ['127.0.0.1', '::1', 'localhost']:
+            return
+            
         today = datetime.now().strftime('%Y-%m-%d')
         now_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now_unix = time.time()
         user_id = ip  # IP를 사용자 ID로 사용
+        
+        # 초 단위 중복 요청 체크 (같은 초에 같은 IP면 제외)
+        second_timestamp = int(now_unix)
+        second_key = f"{ip}_{second_timestamp}"
+        
+        # 초 단위 캐시 초기화
+        if not hasattr(self, '_second_requests'):
+            self._second_requests = {}
+            self._last_cache_cleanup = now_unix
+        
+        # 1분마다 초 단위 캐시 정리
+        if now_unix - self._last_cache_cleanup > 60:
+            self._second_requests.clear()
+            self._last_cache_cleanup = now_unix
+        
+        # 같은 초에 같은 요청이면 무시
+        if second_key in self._second_requests:
+            return
+        
+        self._second_requests[second_key] = now_unix
+        
+        # 세션 관리
+        self._update_session(ip, now_unix, endpoint)
         
         # 사용자별 통계
         if user_id not in self.stats_data["users"]:
@@ -307,19 +337,29 @@ class AccessLogger:
                 "unique_days": [],
                 "first_seen": today,
                 "last_seen": today,
-                "last_access_time": now_timestamp,  # 정확한 마지막 접속 시간
+                "last_access_time": now_timestamp,
+                "session_count": 0,  # 총 세션 수
+                "total_session_time": 0,  # 총 세션 시간 (초)
+                "current_session_start": now_timestamp,  # 현재 세션 시작 시간
                 "daily_requests": {},
-                "endpoints": {}
+                "endpoints": {},
+                "sessions": []  # 세션 히스토리
             }
         
         user_data = self.stats_data["users"][user_id]
         user_data["total_requests"] += 1
         user_data["last_seen"] = today
-        user_data["last_access_time"] = now_timestamp  # 실시간 업데이트
+        user_data["last_access_time"] = now_timestamp
         
-        # 기존 사용자에게 last_access_time이 없는 경우 추가
-        if "last_access_time" not in user_data:
-            user_data["last_access_time"] = now_timestamp
+        # 기존 사용자에게 새로운 필드 추가
+        if "session_count" not in user_data:
+            user_data["session_count"] = 0
+        if "total_session_time" not in user_data:
+            user_data["total_session_time"] = 0
+        if "current_session_start" not in user_data:
+            user_data["current_session_start"] = now_timestamp
+        if "sessions" not in user_data:
+            user_data["sessions"] = []
         
         if ip not in user_data["ip_addresses"]:
             user_data["ip_addresses"].append(ip)
@@ -412,9 +452,155 @@ class AccessLogger:
         
         return True
     
+    def _update_session(self, ip: str, now_unix: float, endpoint: str):
+        """세션 업데이트 - 접속/재접속/세션 종료 관리"""
+        # localhost IP 제외
+        if ip in ['127.0.0.1', '::1', 'localhost']:
+            return
+            
+        # 세션 타임아웃된 사용자 정리
+        self._cleanup_expired_sessions(now_unix)
+        
+        # 현재 사용자 세션 확인
+        if ip in self.active_sessions:
+            # 기존 세션 업데이트
+            session = self.active_sessions[ip]
+            session["last_activity"] = now_unix
+            session["request_count"] += 1
+            session["last_endpoint"] = endpoint
+            
+            # 사용자 데이터의 현재 세션 시간 업데이트
+            if ip in self.stats_data["users"]:
+                user_data = self.stats_data["users"][ip]
+                session_duration = now_unix - session["start_time"]
+                user_data["current_session_duration"] = int(session_duration)
+                
+                # 세션 관련 정보만 업데이트 (통계는 _update_stats에서 처리)
+                user_data["last_seen"] = datetime.now().strftime('%Y-%m-%d')
+                user_data["last_access_time"] = datetime.fromtimestamp(now_unix).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            # 새 세션 시작
+            self.active_sessions[ip] = {
+                "start_time": now_unix,
+                "last_activity": now_unix,
+                "request_count": 1,
+                "last_endpoint": endpoint,
+                "session_id": f"{ip}_{int(now_unix)}"
+            }
+            
+            # 사용자 데이터에 새 세션 기록 (사용자가 없으면 생성)
+            if ip not in self.stats_data["users"]:
+                # 새 사용자 생성
+                today = datetime.now().strftime('%Y-%m-%d')
+                now_timestamp = datetime.fromtimestamp(now_unix).strftime('%Y-%m-%d %H:%M:%S')
+                self.stats_data["users"][ip] = {
+                    "primary_ip": ip,
+                    "ip_addresses": [ip],
+                    "total_requests": 0,
+                    "unique_days": [],
+                    "first_seen": today,
+                    "last_seen": today,
+                    "last_access_time": now_timestamp,
+                    "session_count": 0,
+                    "total_session_time": 0,
+                    "current_session_start": now_timestamp,
+                    "daily_requests": {},
+                    "endpoints": {},
+                    "sessions": []
+                }
+            
+            user_data = self.stats_data["users"][ip]
+            user_data["session_count"] += 1
+            user_data["current_session_start"] = datetime.fromtimestamp(now_unix).strftime('%Y-%m-%d %H:%M:%S')
+            user_data["current_session_duration"] = 0
+            
+            # 세션 관련 정보만 업데이트 (통계는 _update_stats에서 처리)
+            user_data["last_seen"] = datetime.now().strftime('%Y-%m-%d')
+            user_data["last_access_time"] = datetime.fromtimestamp(now_unix).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 세션 히스토리에 추가
+            session_info = {
+                "session_id": f"{ip}_{int(now_unix)}",
+                "start_time": datetime.fromtimestamp(now_unix).strftime('%Y-%m-%d %H:%M:%S'),
+                "end_time": None,  # 아직 진행 중
+                "duration": 0,
+                "request_count": 1,
+                "last_endpoint": endpoint
+            }
+            user_data["sessions"].append(session_info)
+            
+            # 최근 100개 세션만 유지
+            if len(user_data["sessions"]) > 100:
+                user_data["sessions"] = user_data["sessions"][-100:]
+    
+    def _cleanup_expired_sessions(self, now_unix: float):
+        """만료된 세션 정리 및 세션 종료 기록"""
+        expired_ips = []
+        
+        for ip, session in self.active_sessions.items():
+            if now_unix - session["last_activity"] > self.session_timeout:
+                # 세션 종료 기록
+                self._record_session_end(ip, session, now_unix)
+                expired_ips.append(ip)
+        
+        # 만료된 세션 제거
+        for ip in expired_ips:
+            del self.active_sessions[ip]
+    
+    def _record_session_end(self, ip: str, session: Dict[str, Any], end_time: float):
+        """세션 종료 기록"""
+        if ip in self.stats_data["users"]:
+            user_data = self.stats_data["users"][ip]
+            session_duration = end_time - session["start_time"]
+            
+            # 총 세션 시간 업데이트
+            user_data["total_session_time"] += int(session_duration)
+            
+            # 세션 히스토리 업데이트
+            for session_info in user_data["sessions"]:
+                if session_info["session_id"] == session["session_id"]:
+                    session_info["end_time"] = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+                    session_info["duration"] = int(session_duration)
+                    session_info["request_count"] = session["request_count"]
+                    break
+    
+    def get_active_users(self) -> Dict[str, Any]:
+        """현재 활성 사용자 정보"""
+        now_unix = time.time()
+        self._cleanup_expired_sessions(now_unix)
+        
+        active_users = []
+        for ip, session in self.active_sessions.items():
+            # localhost IP 제외
+            if ip in ['127.0.0.1', '::1', 'localhost']:
+                continue
+            session_duration = now_unix - session["start_time"]
+            user_data = self.stats_data["users"].get(ip, {})
+            
+            active_users.append({
+                "ip": ip,
+                "session_id": session["session_id"],
+                "session_start": datetime.fromtimestamp(session["start_time"]).strftime('%Y-%m-%d %H:%M:%S'),
+                "session_duration": int(session_duration),
+                "request_count": session["request_count"],
+                "last_endpoint": session["last_endpoint"],
+                "last_activity": datetime.fromtimestamp(session["last_activity"]).strftime('%Y-%m-%d %H:%M:%S'),
+                "total_requests": user_data.get("total_requests", 0),
+                "unique_days": len(user_data.get("unique_days", [])),
+                "first_seen": user_data.get("first_seen", "Unknown")
+            })
+        
+        # 세션 시작 시간으로 정렬 (최신 순)
+        active_users.sort(key=lambda x: x["session_start"], reverse=True)
+        
+        return {
+            "total_active": len(active_users),
+            "active_users": active_users
+        }
+    
     # 통계 API 메서드들
     def get_daily_stats(self) -> Dict[str, Any]:
-        """일별 통계 조회"""
+        """일별 통계 조회 - 실시간 활성 사용자 포함"""
         today = datetime.now().strftime('%Y-%m-%d')
         today_data = self.stats_data["daily_stats"].get(today, {
             "active_users": [],
@@ -422,11 +608,16 @@ class AccessLogger:
             "total_requests": 0
         })
         
+        # 현재 활성 사용자 수
+        active_users_info = self.get_active_users()
+        
         return {
             "total_users": len(self.stats_data["users"]),
             "active_today": len(today_data["active_users"]),
+            "currently_active": active_users_info["total_active"],
             "new_users_today": len(today_data["new_users"]),
-            "total_requests_today": today_data["total_requests"]
+            "total_requests_today": today_data["total_requests"],
+            "active_users_detail": active_users_info["active_users"][:10]  # 상위 10명
         }
     
     def get_daily_trend(self, days: int = 7) -> Dict[str, Any]:
@@ -475,16 +666,34 @@ class AccessLogger:
         return trend_data
     
     def get_users_stats(self) -> Dict[str, Any]:
-        """사용자 통계"""
+        """사용자 통계 - 세션 정보 포함"""
         users = []
         for user_id, data in self.stats_data["users"].items():
+            # localhost IP 제외
+            if user_id in ['127.0.0.1', '::1', 'localhost']:
+                continue
+            # 현재 세션 상태 확인
+            is_active = user_id in self.active_sessions
+            current_session_duration = 0
+            if is_active:
+                now_unix = time.time()
+                session = self.active_sessions[user_id]
+                current_session_duration = int(now_unix - session["start_time"])
+            
             users.append({
                 "user_id": user_id,
                 "display_name": user_id,
                 "primary_ip": data["primary_ip"],
                 "total_requests": data["total_requests"],
                 "unique_days": len(data["unique_days"]),
-                "last_seen": data["last_seen"]
+                "last_seen": data["last_seen"],
+                "last_access_time": data.get("last_access_time", data["last_seen"]),
+                "session_count": data.get("session_count", 0),
+                "total_session_time": data.get("total_session_time", 0),
+                "avg_session_time": round(data.get("total_session_time", 0) / max(data.get("session_count", 1), 1), 1),
+                "is_active": is_active,
+                "current_session_duration": current_session_duration,
+                "current_session_start": data.get("current_session_start", "Unknown")
             })
         
         # 총 요청 수로 정렬
@@ -502,6 +711,9 @@ class AccessLogger:
         
         recent_users = []
         for user_id, data in self.stats_data["users"].items():
+            # localhost IP 제외
+            if user_id in ['127.0.0.1', '::1', 'localhost']:
+                continue
             if data["last_seen"] >= yesterday:
                 # 실제 저장된 마지막 접속 시간 사용
                 last_access = data.get("last_access_time", data["last_seen"])
