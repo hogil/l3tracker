@@ -3252,17 +3252,31 @@ class WaferMapViewer {
                         return;
                     }
                     // 단일 이미지 모드: 현재 표시된 이미지에 라벨링
-                    if (!this.gridMode && (this.selectedImagePath || this.currentImage)) {
+                    if (!this.gridMode && this.selectedImagePath) {
                         this.selectedClass = cls;
                         if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
                         
                         console.log('단일 이미지 모드 라벨링:', { 
                             selectedImagePath: this.selectedImagePath, 
-                            currentImage: !!this.currentImage,
                             gridMode: this.gridMode 
                         });
                         
-                        await this.labelImage();
+                        // 직접 API 호출
+                        const requestBody = { class_name: cls, image_path: this.selectedImagePath };
+                        console.log('단일 이미지 분류 요청 전송:', requestBody);
+                        
+                        const response = await fetch('/api/classify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestBody)
+                        });
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error('분류 실패:', response.status, errorText);
+                        }
+                        
+                        // 버튼 색상 피드백
                         const originalBg = btn.style.background;
                         btn.style.background = '#2ecc40';
                         setTimeout(() => {
