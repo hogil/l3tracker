@@ -1482,13 +1482,12 @@ class WaferMapViewer {
         
         // 파일명 검색 기능 이벤트 리스너
         if (this.dom.searchBtn) {
-            this.dom.searchBtn.addEventListener('click', () => this.showFolderBrowser());
+            this.dom.searchBtn.addEventListener('click', () => this.performSearch());
         }
         if (this.dom.fileSearch) {
             this.dom.fileSearch.addEventListener('keydown', e => {
                 if (e.key === 'Enter') this.performSearch();
             });
-            this.dom.fileSearch.addEventListener('input', () => this.performSearch());
         }
         
 
