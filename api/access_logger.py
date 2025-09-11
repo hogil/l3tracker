@@ -305,9 +305,9 @@ class AccessLogger:
         now_unix = time.time()
         user_id = ip  # IP를 사용자 ID로 사용
         
-        # 초 단위 중복 요청 체크 (같은 초에 같은 IP면 제외)
-        second_timestamp = int(now_unix)
-        second_key = f"{ip}_{second_timestamp}"
+        # 초 단위 중복 요청 체크 (같은 시분초에 같은 IP면 제외)
+        second_timestamp = int(now_unix)  # 초 단위로 그룹핑
+        second_key = f"{ip}_{second_timestamp}"  # 엔드포인트 제외, IP와 초만 사용
         
         # 초 단위 캐시 초기화
         if not hasattr(self, '_second_requests'):
@@ -319,7 +319,7 @@ class AccessLogger:
             self._second_requests.clear()
             self._last_cache_cleanup = now_unix
         
-        # 같은 초에 같은 요청이면 무시
+        # 같은 초에 같은 IP 요청이면 무시
         if second_key in self._second_requests:
             return
         

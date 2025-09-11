@@ -344,7 +344,7 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         try:
             logger_instance._update_stats(client_ip, endpoint, method)
         except Exception as e:
-            print(f"DEBUG: 통계 업데이트 실패: {e}")
+            pass
 
         # 내부 통계만 기록(콘솔은 우리가 처리)
         try:
@@ -511,7 +511,8 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     key = str(target)
     if should_cache:
         cached = DIRLIST_CACHE.get(key)
-        if cached is not None: return cached
+    if cached is not None:
+        return cached
 
     items: List[Dict[str, str]] = []
     try:
