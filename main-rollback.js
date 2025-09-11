@@ -228,10 +228,6 @@ class WaferMapViewer {
         // 썸네일 매니저
         this.thumbnailManager = new ThumbnailManager();
         
-        // 반도체 특화 렌더러 초기화
-        this.semiconductorRenderer = null;
-        this.initSemiconductorRenderer();
-        
         // 주기적인 메모리 정리 (5분마다)
         this.cleanupInterval = setInterval(() => {
             this.performCleanup();
@@ -241,20 +237,6 @@ class WaferMapViewer {
         window.addEventListener('beforeunload', () => {
             this.cleanup();
         });
-    }
-    
-    initSemiconductorRenderer() {
-        if (typeof SemiconductorRenderer !== 'undefined' && this.dom?.imageCanvas) {
-            this.semiconductorRenderer = new SemiconductorRenderer(this.dom.imageCanvas, {
-                preserveChipBoundaries: true,
-                enhanceDefects: true,
-                chipBoundaryColor: '#00FF00',
-                defectEnhancement: 2.0
-            });
-            console.log('반도체 특화 렌더러 초기화 완료');
-        } else {
-            console.warn('SemiconductorRenderer 또는 imageCanvas가 준비되지 않았습니다');
-        }
     }
 
     /**

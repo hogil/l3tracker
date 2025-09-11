@@ -56,7 +56,7 @@ logger = logging.getLogger("l3tracker")
 # 컬럼폭은 화면폭 기준으로 조정. PATH/NOTE 넉넉히 줌.
 ACCESS_TABLE_COLOR = os.getenv("ACCESS_TABLE_COLOR", "1") != "0"  # 0이면 색 끔
 ACCESS_TABLE_WIDTHS = [
-    ("TAG", 7), ("TIME", 19), ("IP", 15), ("METHOD", 6), ("STS", 3), ("PATH", 24), ("NOTE", 50)
+    ("TAG", 7), ("TIME", 23), ("IP", 12), ("METHOD", 6), ("STS", 5), ("PATH", 26), ("NOTE", 50)
 ]
 
 def _ansi(code: str) -> str:
