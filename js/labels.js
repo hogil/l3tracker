@@ -76,6 +76,130 @@ export class LabelManager {
         if (this.elements.batchDeleteBtn) {
             this.elements.batchDeleteBtn.addEventListener('click', () => this.deleteSelectedLabels());
         }
+        
+        // 모달 이벤트 바인딩
+        this.bindModalEvents();
+    }
+    
+    /**
+     * 모달 이벤트 바인딩
+     */
+    bindModalEvents() {
+        // 모달 닫기 버튼
+        const closeBtn = document.querySelector('#add-label-modal .modal-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.closeAddLabelModal());
+        }
+        
+        // 모달 취소 버튼
+        const cancelBtn = document.getElementById('modal-cancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.closeAddLabelModal());
+        }
+        
+        // 모달 확인 버튼
+        const addLabelBtn = document.getElementById('modal-add-label');
+        if (addLabelBtn) {
+            addLabelBtn.addEventListener('click', () => this.addLabelsToSelectedImages());
+        }
+        
+        // 모달 배경 클릭으로 닫기
+        const modal = document.getElementById('add-label-modal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closeAddLabelModal();
+                }
+            });
+        }
+    }
+    
+    /**
+     * 모달 닫기
+     */
+    closeAddLabelModal() {
+        const modal = document.getElementById('add-label-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    /**
+     * 선택된 이미지들에 라벨 추가
+     */
+    async addLabelsToSelectedImages() {
+        const selectedImages = this.viewer.getSelectedImagesForModal();
+        if (selectedImages.length === 0) {
+            alert('라벨을 추가할 이미지를 선택해주세요.');
+            return;
+        }
+        
+        // 클래스 선택 확인
+        const classSelect = document.getElementById('modal-class-select');
+        const newClassInput = document.getElementById('modal-new-class-input');
+        
+        let className = '';
+        if (classSelect && classSelect.value) {
+            className = classSelect.value;
+        } else if (newClassInput && newClassInput.value.trim()) {
+            className = newClassInput.value.trim();
+        }
+        
+        if (!className) {
+            alert('클래스를 선택하거나 새 클래스 이름을 입력해주세요.');
+            return;
+        }
+        
+        // 라벨 액션 확인
+        const labelAction = document.querySelector('input[name="label-action"]:checked');
+        const action = labelAction ? labelAction.value : 'add-all';
+        
+        try {
+            // 라벨 추가 API 호출
+            const response = await fetch('/api/classify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    images: selectedImages,
+                    class: className,
+                    action: action
+                })
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || '라벨 추가에 실패했습니다.');
+            }
+            
+            const result = await response.json();
+            console.log('라벨 추가 성공:', result);
+            
+            // 모달 닫기
+            this.closeAddLabelModal();
+            
+            // UI 새로고침
+            await this.refreshAll();
+            
+            alert(`라벨 "${className}"이 성공적으로 추가되었습니다.`);
+            
+        } catch (error) {
+            console.error('라벨 추가 오류:', error);
+            alert(`라벨 추가 실패: ${error.message}`);
+        }
+    }
+    
+    /**
+     * 모달의 이미지 정보 업데이트
+     */
+    updateModalImageInfo(selectedImages) {
+        const imageInfo = document.getElementById('current-image-info');
+        if (imageInfo) {
+            if (selectedImages.length === 1) {
+                imageInfo.textContent = `Selected: ${selectedImages[0]}`;
+            } else {
+                imageInfo.textContent = `Selected: ${selectedImages.length} images`;
+            }
+        }
     }
     
     /**

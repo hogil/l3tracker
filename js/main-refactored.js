@@ -730,12 +730,24 @@ class WaferMapViewer {
      * 선택된 이미지들 반환 (모달용)
      */
     getSelectedImagesForModal() {
-        if (this.gridMode && this.gridSelectedIdxs.length > 0) {
+        // 그리드 모드에서 선택된 이미지들
+        if (this.gridMode && this.gridSelectedIdxs && this.gridSelectedIdxs.length > 0) {
             return this.gridSelectedIdxs.map(idx => this.selectedImages[idx]).filter(Boolean);
         }
+        
+        // 이미지 크게 보기 모드에서 현재 선택된 이미지
         if (this.selectedImagePath) {
             return [this.selectedImagePath];
         }
+        
+        // 그리드 모드이지만 선택된 인덱스가 없는 경우, 현재 이미지 목록에서 선택된 것들 확인
+        if (this.gridMode && this.selectedImages && this.selectedImages.length > 0) {
+            // 그리드 매니저에서 선택된 이미지들 가져오기
+            if (this.gridManager && this.gridManager.getSelectedImages) {
+                return this.gridManager.getSelectedImages();
+            }
+        }
+        
         return [];
     }
     
