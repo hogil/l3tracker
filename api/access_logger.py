@@ -291,6 +291,7 @@ class AccessLogger:
     def _update_stats(self, ip: str, endpoint: str, method: str):
         """통계 업데이트"""
         today = datetime.now().strftime('%Y-%m-%d')
+        now_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         user_id = ip  # IP를 사용자 ID로 사용
         
         # 사용자별 통계
@@ -302,6 +303,7 @@ class AccessLogger:
                 "unique_days": [],
                 "first_seen": today,
                 "last_seen": today,
+                "last_access_time": now_timestamp,  # 정확한 마지막 접속 시간
                 "daily_requests": {},
                 "endpoints": {}
             }
@@ -309,6 +311,11 @@ class AccessLogger:
         user_data = self.stats_data["users"][user_id]
         user_data["total_requests"] += 1
         user_data["last_seen"] = today
+        user_data["last_access_time"] = now_timestamp  # 실시간 업데이트
+        
+        # 기존 사용자에게 last_access_time이 없는 경우 추가
+        if "last_access_time" not in user_data:
+            user_data["last_access_time"] = now_timestamp
         
         if ip not in user_data["ip_addresses"]:
             user_data["ip_addresses"].append(ip)
@@ -492,8 +499,8 @@ class AccessLogger:
         recent_users = []
         for user_id, data in self.stats_data["users"].items():
             if data["last_seen"] >= yesterday:
-                # 최근 접속 시간 계산
-                last_access = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                # 실제 저장된 마지막 접속 시간 사용
+                last_access = data.get("last_access_time", data["last_seen"])
                 
                 recent_users.append({
                     "user_id": user_id,
@@ -503,8 +510,8 @@ class AccessLogger:
                     "last_access": last_access
                 })
         
-        # 요청 수로 정렬
-        recent_users.sort(key=lambda x: x["total_requests"], reverse=True)
+        # 마지막 접속 시간으로 정렬 (최신 순)
+        recent_users.sort(key=lambda x: x["last_access"], reverse=True)
         
         return {
             "total_recent": len(recent_users),
