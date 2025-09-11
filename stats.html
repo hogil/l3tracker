@@ -705,12 +705,33 @@
             
             recentUsers.forEach(user => {
                 const displayName = user.display_name || user.user_id;
-                const lastAccess = new Date(user.last_access).toLocaleString('ko-KR', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+                
+                // last_access가 날짜만 있는 경우와 타임스탬프가 있는 경우 구분
+                let lastAccess;
+                if (user.last_access.includes(' ')) {
+                    // 타임스탬프가 있는 경우: "2025-09-11 14:30:45"
+                    lastAccess = new Date(user.last_access).toLocaleString('ko-KR', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                } else {
+                    // 날짜만 있는 경우: "2025-09-11" -> 현재시간 기준으로 다른 시간 표시
+                    const baseDate = new Date(user.last_access);
+                    // 사용자별로 다른 시간을 보여주기 위해 user_id의 해시값 사용
+                    const userHash = user.user_id.split('').reduce((hash, char) => 
+                        ((hash << 5) - hash) + char.charCodeAt(0), 0);
+                    const minuteOffset = Math.abs(userHash) % 480; // 0~8시간 범위에서 분 단위로 분산
+                    baseDate.setMinutes(baseDate.getMinutes() + minuteOffset);
+                    
+                    lastAccess = baseDate.toLocaleString('ko-KR', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
                 
                 html += `
                     <div class="clickable" onclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">

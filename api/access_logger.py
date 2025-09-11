@@ -61,6 +61,10 @@ class AccessLogger:
     
     def log_access(self, request: Request, endpoint: str, status_code: int = 200):
         """테이블 형식 접속 로그 기록"""
+        # stats 관련 요청은 로깅하지 않음
+        if '/api/stats' in endpoint or endpoint == '/stats' or endpoint.endswith('/stats.html'):
+            return
+            
         client_ip = self.get_client_ip(request)
         method = request.method
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
