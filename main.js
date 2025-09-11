@@ -2064,6 +2064,9 @@ class WaferMapViewer {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
+            // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             // 각 이미지 크기 (512px로 설정)
             const imageSize = 512;
             canvas.width = cols * imageSize;
@@ -2152,6 +2155,10 @@ class WaferMapViewer {
 
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
+            
+            // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             const imageSize = 512;
             canvas.width = cols * imageSize;
             canvas.height = rows * imageSize;
@@ -2249,6 +2256,10 @@ class WaferMapViewer {
             canvas.width = img.width;
             canvas.height = img.height;
             const ctx = canvas.getContext('2d');
+            
+            // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
+            ctx.imageSmoothingEnabled = false;
+            
             ctx.drawImage(img, 0, 0);
             canvas.toBlob(async (out) => {
                 try {
@@ -2925,8 +2936,10 @@ class WaferMapViewer {
         this.imageCtx.fillStyle = '#000';
         this.imageCtx.fillRect(0, 0, width, height);
         this.imageCtx.restore();
-        // Draw the image
+        // Draw the image with pixel-perfect rendering (no interpolation)
         this.imageCtx.save();
+        // Disable image smoothing for pixel-perfect display
+        this.imageCtx.imageSmoothingEnabled = false;
         this.imageCtx.translate(this.transform.dx, this.transform.dy);
         this.imageCtx.scale(this.transform.scale, this.transform.scale);
         this.imageCtx.drawImage(this.currentImage, 0, 0);
@@ -3085,6 +3098,10 @@ class WaferMapViewer {
         const padX = (mapW - imgW * scale) / 2;
         const padY = (mapH - imgH * scale) / 2;
         this.minimapCtx.clearRect(0, 0, mapW, mapH);
+        
+        // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
+        this.minimapCtx.imageSmoothingEnabled = false;
+        
         this.minimapCtx.drawImage(this.currentImage, padX, padY, imgW * scale, imgH * scale);
         // 메인 뷰의 영역(이미지 좌표계) → 미니맵 좌표계로 변환
         const { width: viewW, height: viewH } = this.dom.viewerContainer.getBoundingClientRect();
@@ -3234,40 +3251,8 @@ class WaferMapViewer {
                         }, 200);
                         return;
                     }
-                    // 단일 이미지 모드: 현재 표시된 이미지에 라벨링
-                    if (!this.gridMode && this.currentImageIndex !== -1 && this.selectedImages[this.currentImageIndex]) {
-                        this.selectedClass = cls;
-                        if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
-                        
-                        // 현재 표시된 이미지의 경로 사용
-                        const currentImagePath = this.selectedImages[this.currentImageIndex];
-                        const requestBody = { class_name: cls, image_path: currentImagePath };
-                        console.log('단일 이미지 분류 요청 전송:', requestBody);
-                        
-                        const response = await fetch('/api/classify', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(requestBody)
-                        });
-                        
-                        if (!response.ok) {
-                            const errorText = await response.text();
-                            console.error('분류 실패:', response.status, errorText);
-                        }
-                        
-                        // 버튼 색상 피드백
-                        const originalBg = btn.style.background;
-                        btn.style.background = '#2ecc40';
-                        setTimeout(() => {
-                            btn.style.background = originalBg;
-                            this.refreshLabelExplorer();
-                            // 추가로 강제 새로고침
-                            setTimeout(() => this.refreshLabelExplorer(), 100);
-                        }, 200);
-                        return;
-                    }
-                    // 기존 단일 이미지 모드 처리 (selectedImagePath가 있는 경우)
-                    else if (this.selectedImagePath) {
+                    // 단일 이미지 모드: 현재 표시된 이미지에 라벨링 (selectedImagePath가 있는 경우)
+                    if (!this.gridMode && this.selectedImagePath) {
                         this.selectedClass = cls;
                         if (this.dom.labelStatus) this.dom.labelStatus.textContent = '';
                         await this.labelImage();
