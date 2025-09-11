@@ -217,6 +217,26 @@ class ThumbnailManager {
     }
 }
 
+/**
+ * 픽셀 완벽 렌더링을 위한 유틸리티 함수
+ * 모든 브라우저에서 이미지 스무딩을 완전히 비활성화
+ */
+function setPixelPerfectRendering(ctx) {
+    // 표준 속성
+    ctx.imageSmoothingEnabled = false;
+    
+    // 벤더별 속성들 (브라우저 호환성)
+    ctx.webkitImageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.msImageSmoothingEnabled = false;
+    ctx.oImageSmoothingEnabled = false;
+    
+    // 고해상도 디스플레이를 위한 추가 설정
+    if (ctx.imageSmoothingQuality) {
+        ctx.imageSmoothingQuality = 'low';
+    }
+}
+
 class WaferMapViewer {
     constructor() {
         this.cacheDom();
@@ -2064,7 +2084,7 @@ class WaferMapViewer {
             const ctx = canvas.getContext('2d');
             
             // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
-            ctx.imageSmoothingEnabled = false;
+            setPixelPerfectRendering(ctx);
             
             // 각 이미지 크기 (512px로 설정)
             const imageSize = 512;
@@ -2156,7 +2176,7 @@ class WaferMapViewer {
             const ctx = canvas.getContext('2d');
             
             // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
-            ctx.imageSmoothingEnabled = false;
+            setPixelPerfectRendering(ctx);
             
             const imageSize = 512;
             canvas.width = cols * imageSize;
@@ -2257,7 +2277,7 @@ class WaferMapViewer {
             const ctx = canvas.getContext('2d');
             
             // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
-            ctx.imageSmoothingEnabled = false;
+            setPixelPerfectRendering(ctx);
             
             ctx.drawImage(img, 0, 0);
             canvas.toBlob(async (out) => {
@@ -2938,7 +2958,7 @@ class WaferMapViewer {
         // Draw the image with pixel-perfect rendering (no interpolation)
         this.imageCtx.save();
         // Disable image smoothing for pixel-perfect display
-        this.imageCtx.imageSmoothingEnabled = false;
+        setPixelPerfectRendering(this.imageCtx);
         this.imageCtx.translate(this.transform.dx, this.transform.dy);
         this.imageCtx.scale(this.transform.scale, this.transform.scale);
         this.imageCtx.drawImage(this.currentImage, 0, 0);
@@ -3099,7 +3119,7 @@ class WaferMapViewer {
         this.minimapCtx.clearRect(0, 0, mapW, mapH);
         
         // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
-        this.minimapCtx.imageSmoothingEnabled = false;
+        setPixelPerfectRendering(this.minimapCtx);
         
         this.minimapCtx.drawImage(this.currentImage, padX, padY, imgW * scale, imgH * scale);
         // 메인 뷰의 영역(이미지 좌표계) → 미니맵 좌표계로 변환
