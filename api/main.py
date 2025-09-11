@@ -15,6 +15,7 @@ import json
 import time
 import shutil
 import logging
+import asyncio
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from collections import OrderedDict
@@ -37,7 +38,7 @@ from . import config
 # ========== 로깅 ==========
 import logging.config
 
-# 로깅 설정 - access_logger와 충돌 방지
+# 로깅 설정 - 서버 시작 로그 보이게 수정
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -54,19 +55,37 @@ LOGGING_CONFIG = {
             "stream": "ext://sys.stdout"
         }
     },
+    "root": {  # root에 콘솔 핸들러 달기
+        "level": "INFO",
+        "handlers": ["console"]
+    },
     "loggers": {
+        # 서버 시작/에러는 보이게
         "uvicorn": {
-            "handlers": [],
-            "level": "CRITICAL",  # 모든 uvicorn 로그 비활성화
+            "handlers": ["console"],
+            "level": "INFO",
             "propagate": False
         },
+        "uvicorn.error": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+        # 접속 한 줄 로그만 잠그고 싶으면 access만 CRITICAL 유지
         "uvicorn.access": {
             "handlers": [],
-            "level": "CRITICAL",  # ACCESS 로그 완전 비활성화
+            "level": "CRITICAL",
             "propagate": False
         },
-        # access_logger는 별도 설정 유지
+        # 너가 쓰는 앱 로거도 확실히 보이게
+        "l3tracker": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+        # access 로거를 네 커스텀 미들웨어에서만 쓰면, 여기 따로 안 둬도 됨
         "access": {
+            "handlers": ["console"],
             "level": "INFO",
             "propagate": False
         }
@@ -186,6 +205,24 @@ THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 
 # ========== FastAPI ==========
 app = FastAPI(title="L3Tracker API", version="2.4.0")
+
+# 서버 시작 이벤트
+@app.on_event("startup")
+async def startup_event():
+    # Uvicorn 표준 에러 로거를 쓰면 콘솔/저널에 확실히 찍힘
+    bootlog = logging.getLogger("uvicorn.error")
+    bootlog.info("🚀 L3Tracker 서버 시작 (테이블 로그 시스템)")
+    bootlog.info(f"📍 호스트: {config.DEFAULT_HOST}")
+    bootlog.info(f"🔌 포트: {config.DEFAULT_PORT}")
+    bootlog.info(f"📁 ROOT_DIR: {config.ROOT_DIR}")
+    bootlog.info(f"🔧 PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}")
+    bootlog.info("=" * 50)
+    
+    # 기존 코드 유지
+    _classification_dir().mkdir(parents=True, exist_ok=True)
+    _labels_load()
+    global CLASSES_MTIME; CLASSES_MTIME = _classes_stat_mtime()
+    asyncio.create_task(build_file_index_background())
 
 # 접속 추적 미들웨어 (단순화: IP만 로깅)
 class AccessTrackingMiddleware(BaseHTTPMiddleware):
@@ -1428,30 +1465,14 @@ async def browse_folders(path: Optional[str] = None):
 
 if __name__ == "__main__":
     import uvicorn
-    import sys
-    import os
-    
-    # 서버 시작 메시지 강제 출력
-    sys.stdout.write("🚀 L3Tracker 서버 시작 중...\n")
-    sys.stdout.write(f"📍 호스트: {config.DEFAULT_HOST}\n")
-    sys.stdout.write(f"🔌 포트: {config.DEFAULT_PORT}\n")
-    sys.stdout.write(f"📁 루트 디렉토리: {config.ROOT_DIR}\n")
-    sys.stdout.write("=" * 50 + "\n")
-    sys.stdout.flush()
-    
-    # 환경 변수 확인
-    sys.stdout.write(f"🔧 PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}\n")
-    sys.stdout.write("=" * 50 + "\n")
-    sys.stdout.flush()
-    
     uvicorn.run(
         app,
         host=config.DEFAULT_HOST,
         port=config.DEFAULT_PORT,
         reload=config.DEFAULT_RELOAD,
         workers=config.DEFAULT_WORKERS,
-        log_level="info",     # 서버 시작 로그 표시
-        access_log=True,      # uvicorn access 로그 활성화 (서버 시작 메시지용)
-        use_colors=True,      # 컬러 로그 활성화
-        log_config=None,      # 기본 로그 설정 사용
+        log_level="info",
+        access_log=False,     # uvicorn access 로그 비활성화 (커스텀 로거 사용)
+        use_colors=True,
+        log_config=None,
     )
