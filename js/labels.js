@@ -371,11 +371,38 @@ export class LabelManager {
         button.dataset.className = cls.name;
         
         // 클릭 이벤트
-        button.addEventListener('click', (e) => {
+        button.addEventListener('click', async (e) => {
+            const className = cls.name;
+            const selected = (this.viewer && typeof this.viewer.getSelectedImagesForModal === 'function')
+                ? this.viewer.getSelectedImagesForModal()
+                : [];
+
+            // 이미지가 선택되어 있으면 즉시 분류 추가
+            if (selected && selected.length > 0) {
+                try {
+                    const res = await fetch('/api/classify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ images: selected, class: className, action: 'add-all' })
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.error || `분류 추가 실패 (${res.status})`);
+                    }
+                    // UI 갱신
+                    await this.refreshAll();
+                } catch (err) {
+                    console.error('라벨 추가 오류:', err);
+                    alert(`라벨 추가 실패: ${err.message || err}`);
+                }
+                return;
+            }
+
+            // 이미지 선택이 없으면 선택/토글 동작
             if (e.ctrlKey) {
-                this.toggleClassSelection(cls.name);
+                this.toggleClassSelection(className);
             } else {
-                this.selectClass(cls.name);
+                this.selectClass(className);
             }
             this.updateClassButtonStates();
         });
