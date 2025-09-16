@@ -651,6 +651,11 @@ class ClassifyDeleteRequest(BaseModel):
     image_name: Optional[str] = None
     class_name: str
 
+# 프런트 호환: 배치 삭제용 요청 스키마 (POST /api/classify/delete)
+class ClassifyDeleteBatchReq(BaseModel):
+    images: List[str]
+    class_: str = Field(alias="class")
+
 # ======================== Endpoints ========================
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None):
@@ -1192,6 +1197,44 @@ async def delete_classification(request: ClassifyDeleteRequest, _=Depends(labels
         
     except Exception as e:
         logger.exception(f"분류 제거 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 프런트엔드가 사용하는 엔드포인트: POST /api/classify/delete
+@app.post("/api/classify/delete")
+async def classify_delete_batch(request: ClassifyDeleteBatchReq, _=Depends(labels_classes_sync_dep)):
+    try:
+        class_name = request.class_.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+
+        class_dir = _classification_dir() / class_name
+        removed = 0
+        for any_path in request.images:
+            try:
+                rel_path = relkey_from_any_path(any_path)
+                abs_path = ROOT_DIR / rel_path
+                target_file = class_dir / abs_path.name
+                if target_file.exists():
+                    try:
+                        target_file.unlink()
+                    except FileNotFoundError:
+                        pass
+                with LABELS_LOCK:
+                    labels = set(LABELS.get(rel_path, []))
+                    if class_name in labels:
+                        labels.discard(class_name)
+                        LABELS[rel_path] = sorted(labels) if labels else LABELS.pop(rel_path, None) or []
+                removed += 1
+            except Exception:
+                continue
+
+        _labels_save(); _dircache_invalidate(class_dir)
+        log_access_row(tag="ACTION", note=f"배치 분류 제거: {removed} items from {class_name}")
+        return {"success": True, "removed": removed, "class": class_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"배치 분류 제거 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- Static / Pages ----------------
