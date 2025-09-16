@@ -269,9 +269,10 @@ class WaferMapViewer {
                 preserveChipBoundaries: true,
                 enhanceDefects: true,
                 chipBoundaryColor: '#00FF00',
-                defectEnhancement: 2.0
+                defectEnhancement: 2.0,
+                usePyramid: true // 이미지 피라미드 활성화
             });
-            console.log('반도체 특화 렌더러 초기화 완료');
+            console.log('반도체 특화 렌더러 초기화 완료 (이미지 피라미드 활성화)');
         } else {
             console.warn('SemiconductorRenderer 또는 imageCanvas가 준비되지 않았습니다');
         }

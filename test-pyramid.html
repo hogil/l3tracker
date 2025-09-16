@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>반도체 불량맵 이미지 피라미드 테스트</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00ff00;
+            margin-bottom: 20px;
+        }
+        .controls {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .controls button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .controls button:hover {
+            background: #00cc00;
+            transform: translateY(-2px);
+        }
+        .controls input[type="file"] {
+            padding: 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        .controls input[type="range"] {
+            width: 200px;
+        }
+        .info-panel {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .info-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            color: #00ff00;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        .canvas-container {
+            background: #000;
+            border: 2px solid #00ff00;
+            border-radius: 8px;
+            padding: 10px;
+            display: inline-block;
+            position: relative;
+            overflow: auto;
+            max-width: 100%;
+            max-height: 70vh;
+        }
+        #semiconductorCanvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+        .status-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #00ff00;
+            color: #000;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+        .status-message.show {
+            opacity: 1;
+        }
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .preset-buttons button {
+            background: #0088ff;
+        }
+        .preset-buttons button:hover {
+            background: #0066cc;
+        }
+        .pyramid-indicator {
+            background: #ff6600;
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 반도체 불량맵 이미지 피라미드 렌더러</h1>
+        
+        <div class="controls">
+            <input type="file" id="imageInput" accept="image/*">
+            <button onclick="loadSampleImage()">샘플 이미지 로드</button>
+            <div style="flex: 1;"></div>
+            <label>
+                <input type="checkbox" id="pyramidToggle" checked>
+                이미지 피라미드 사용
+            </label>
+        </div>
+
+        <div class="controls">
+            <label>축소 비율: </label>
+            <input type="range" id="scaleSlider" min="5" max="100" value="100">
+            <span id="scaleValue">100%</span>
+            <div class="preset-buttons">
+                <button onclick="setScale(100)">100%</button>
+                <button onclick="setScale(50)">50%</button>
+                <button onclick="setScale(25)">25%</button>
+                <button onclick="setScale(19)">19%</button>
+                <button onclick="setScale(10)">10%</button>
+            </div>
+            <button onclick="fitToScreen()">화면 맞춤</button>
+        </div>
+
+        <div class="info-panel" id="infoPanel">
+            <div class="info-item">
+                <span class="info-label">원본 크기</span>
+                <span class="info-value" id="originalSize">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">표시 크기</span>
+                <span class="info-value" id="displaySize">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">축소 비율</span>
+                <span class="info-value" id="currentScale">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">사용 중인 이미지</span>
+                <span class="info-value" id="pyramidLevel">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">렌더링 모드</span>
+                <span class="info-value" id="renderMode">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">피라미드 상태</span>
+                <span class="info-value" id="pyramidStatus">-</span>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="semiconductorCanvas"></canvas>
+        </div>
+
+        <div class="status-message" id="statusMessage"></div>
+    </div>
+
+    <script src="js/semiconductor-renderer.js"></script>
+    <script>
+        let renderer;
+        let currentImage = null;
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('semiconductorCanvas');
+            renderer = new SemiconductorRenderer(canvas, {
+                preserveChipBoundaries: true,
+                enhanceDefects: true,
+                usePyramid: true
+            });
+
+            // 이벤트 리스너 설정
+            document.getElementById('imageInput').addEventListener('change', handleImageUpload);
+            document.getElementById('scaleSlider').addEventListener('input', handleScaleChange);
+            document.getElementById('pyramidToggle').addEventListener('change', handlePyramidToggle);
+
+            // 샘플 이미지 자동 로드
+            loadSampleImage();
+        });
+
+        // 이미지 업로드 처리
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        currentImage = img;
+                        renderer.loadImage(img);
+                        updateInfo();
+                        showStatus('이미지 로드 완료');
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // 샘플 이미지 로드
+        function loadSampleImage() {
+            showStatus('샘플 이미지 생성 중...');
+            
+            // 4000x4000 반도체 불량맵 시뮬레이션 이미지 생성
+            const size = 4000;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // 배경 (웨이퍼)
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, size, size);
+            
+            // 칩 그리드 그리기
+            const chipSize = 100; // 40x40 칩
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            
+            for (let x = 0; x < size; x += chipSize) {
+                for (let y = 0; y < size; y += chipSize) {
+                    ctx.strokeRect(x, y, chipSize, chipSize);
+                    
+                    // 칩 ID
+                    ctx.fillStyle = '#00ff00';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(`${Math.floor(x/chipSize)},${Math.floor(y/chipSize)}`, x + 5, y + 15);
+                    
+                    // 랜덤 불량 픽셀
+                    const defectCount = Math.random() * 10;
+                    for (let i = 0; i < defectCount; i++) {
+                        const dx = x + Math.random() * chipSize;
+                        const dy = y + Math.random() * chipSize;
+                        const defectType = Math.random();
+                        
+                        if (defectType < 0.3) {
+                            ctx.fillStyle = '#ff0000'; // 빨간 불량
+                        } else if (defectType < 0.6) {
+                            ctx.fillStyle = '#ffff00'; // 노란 불량
+                        } else {
+                            ctx.fillStyle = '#ffffff'; // 흰 불량
+                        }
+                        
+                        ctx.fillRect(dx, dy, 2, 2);
+                    }
+                }
+            }
+            
+            // 웨이퍼 원형 마스크
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2 - 50, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            // 이미지로 변환
+            const img = new Image();
+            img.onload = () => {
+                currentImage = img;
+                renderer.loadImage(img);
+                updateInfo();
+                showStatus('4000x4000 샘플 이미지 로드 완료');
+            };
+            img.src = canvas.toDataURL('image/png');
+        }
+
+        // 축소 비율 변경
+        function handleScaleChange(event) {
+            const scale = parseInt(event.target.value) / 100;
+            renderer.setScale(scale);
+            document.getElementById('scaleValue').textContent = event.target.value + '%';
+            updateInfo();
+        }
+
+        // 축소 비율 프리셋
+        function setScale(percent) {
+            const scale = percent / 100;
+            renderer.setScale(scale);
+            document.getElementById('scaleSlider').value = percent;
+            document.getElementById('scaleValue').textContent = percent + '%';
+            updateInfo();
+        }
+
+        // 화면 맞춤
+        function fitToScreen() {
+            const container = document.querySelector('.canvas-container');
+            const scale = renderer.fitToContainer(
+                container.clientWidth - 20,
+                window.innerHeight * 0.6
+            );
+            const percent = Math.round(scale * 100);
+            document.getElementById('scaleSlider').value = percent;
+            document.getElementById('scaleValue').textContent = percent + '%';
+            updateInfo();
+        }
+
+        // 피라미드 토글
+        function handlePyramidToggle(event) {
+            renderer.options.usePyramid = event.target.checked;
+            if (currentImage) {
+                if (event.target.checked) {
+                    renderer.generateImagePyramid(currentImage);
+                }
+                renderer.render();
+                updateInfo();
+                showStatus(`이미지 피라미드 ${event.target.checked ? '활성화' : '비활성화'}`);
+            }
+        }
+
+        // 정보 업데이트
+        function updateInfo() {
+            const info = renderer.getInfo();
+            
+            document.getElementById('originalSize').textContent = 
+                info.originalWidth ? `${info.originalWidth} × ${info.originalHeight}` : '-';
+            document.getElementById('displaySize').textContent = 
+                info.displayWidth ? `${info.displayWidth} × ${info.displayHeight}` : '-';
+            document.getElementById('currentScale').textContent = 
+                info.scalePercent ? `${info.scalePercent}%` : '-';
+            document.getElementById('pyramidLevel').textContent = 
+                info.pyramidLevel || '-';
+            document.getElementById('renderMode').textContent = 
+                info.renderMode || '-';
+            document.getElementById('pyramidStatus').textContent = 
+                info.pyramidEnabled ? '활성화' : '비활성화';
+        }
+
+        // 상태 메시지 표시
+        function showStatus(message) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.classList.add('show');
+            setTimeout(() => {
+                statusEl.classList.remove('show');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
