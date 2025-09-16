@@ -1,11 +1,5 @@
 """
-L3Tracker - Wafer Map Viewer API (Refactored w/ Pretty Table Logs)
-- labels.json mtime 감지 → stale 시 자동 재로딩(멀티 워커 동기화)
-- 디렉터리 캐시: 변경 즉시 무효화(list_dir_fast LRU)
-- 클래스 삭제 시: 해당 class 라벨을 전 이미지에서 제거(일관성 유지)
-- 라벨/클래스 라우트: 항상 no-store 헤더(브라우저 캐시 방지)
-- 라벨/클래스 관련 요청 도착 시: classification mtime 감지 → 라벨 즉시 동기화
-- 테이블형 Access Log: 고정폭 컬럼, 단일 라인 출력, 키워드 색상 하이라이트, NOTE에 파일경로/액션 표시
+L3Tracker - Wafer Map Viewer API (HTTPS, Pretty Table Logs, Noise-free)
 """
 
 # ======================== Imports ========================
@@ -30,7 +24,61 @@ from PIL import Image
 from .access_logger import logger_instance
 from . import config
 
+# ================= Windows ANSI 색상 호환 =================
+try:
+    from colorama import just_fix_windows_console
+    just_fix_windows_console()
+except Exception:
+    pass
+
+# ================= wcwidth 기반 셀 패딩 ====================
+try:
+    from wcwidth import wcwidth as _wcwidth
+except Exception:
+    import unicodedata
+    def _wcwidth(ch: str) -> int:
+        if ch in ("\r", "\n", "\t"):
+            return 0
+        return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+def _one_line(s: str) -> str:
+    return ("" if s is None else str(s)).replace("\r", " ").replace("\n", " ").replace("\t", " ")
+
+def _pad_cell(s: str, width: int) -> str:
+    s = _one_line(s)
+    out, used = [], 0
+    for ch in s:
+        w = _wcwidth(ch)
+        if w < 0:
+            continue
+        if used + w > width:
+            if used < width:
+                out.append("…"); used += 1
+            break
+        out.append(ch); used += w
+    if used < width:
+        out.append(" " * (width - used))
+    return "".join(out)
+
 # ======================== Logging ========================
+class _SuppressNoise(logging.Filter):
+    """자주 보이는 소음 로그(10054/connection_lost/Invalid HTTP request…) 억제"""
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            msg = str(record.msg)
+        lower = msg.lower()
+        if "invalid http request received" in lower:
+            return False
+        if "proactorbasepipetransport._call_connection_lost" in lower:
+            return False
+        if "winerror 10054" in lower:
+            return False
+        if "current connection was forcibly closed by the remote host" in lower:
+            return False
+        return True
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -38,25 +86,28 @@ LOGGING_CONFIG = {
         "simple": {"format": "%(levelname)s: %(asctime)s     %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"}
     },
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "simple", "stream": "ext://sys.stdout"}
+        "console": {"class": "logging.StreamHandler", "formatter": "simple", "stream": "ext://sys.stdout"},
     },
     "root": {"level": "INFO", "handlers": ["console"]},
     "loggers": {
-        "uvicorn": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "uvicorn.error": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "uvicorn.access": {"handlers": [], "level": "CRITICAL", "propagate": False},  # 기본 액세스 로그 끔
-        "l3tracker": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "access": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "uvicorn":        {"handlers": ["console"], "level": "INFO",    "propagate": False},
+        "uvicorn.error":  {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "uvicorn.access": {"handlers": [],          "level": "CRITICAL","propagate": False},
+        "l3tracker":      {"handlers": ["console"], "level": "INFO",    "propagate": False},
+        "access":         {"handlers": ["console"], "level": "INFO",    "propagate": False},
+        "asyncio":        {"handlers": ["console"], "level": "ERROR",   "propagate": False},
     },
 }
 logging.config.dictConfig(LOGGING_CONFIG)
+# 실행 후 필터 부착(딕트 설정만으로는 content-based filter 넣기 번거로움)
+for name in ("uvicorn", "uvicorn.error", "asyncio", ""):
+    logging.getLogger(name).addFilter(_SuppressNoise())
 logger = logging.getLogger("l3tracker")
 
 # ================= Pretty Access Table Logger =================
-# 컬럼폭은 화면폭 기준으로 조정. PATH/NOTE 넉넉히 줌.
 ACCESS_TABLE_COLOR = os.getenv("ACCESS_TABLE_COLOR", "1") != "0"  # 0이면 색 끔
 ACCESS_TABLE_WIDTHS = [
-    ("TAG", 7), ("TIME", 35), ("IP", 20), ("METHOD", 6), ("STS", 8), ("PATH", 24), ("NOTE", 50)
+    ("TAG", 7), ("TIME", 25), ("IP", 14), ("METHOD", 6), ("STS", 8), ("PATH", 24), ("NOTE", 50)
 ]
 
 def _ansi(code: str) -> str:
@@ -68,18 +119,11 @@ CLR = {
     "blue": _ansi("34"), "magenta": _ansi("35"), "cyan": _ansi("36"), "white": _ansi("37"),
 }
 
-def _truncate(s: str, w: int) -> str:
-    s = "" if s is None else str(s)
-    return (s[: w - 1] + "…") if len(s) > w else s
-
-def _pad_plain(s: str, w: int) -> str:
-    return _truncate(s, w).ljust(w)
-
 def _border_line(ch_left: str, ch_mid: str, ch_right: str, ch_fill: str) -> str:
     return ch_left + ch_mid.join(ch_fill * w for _, w in ACCESS_TABLE_WIDTHS) + ch_right
 
 ACCESS_TABLE_HEADER = _border_line("┌", "┬", "┐", "─") + "\n" + \
-    "│" + "│".join(_pad_plain(name, w) for name, w in ACCESS_TABLE_WIDTHS) + "│\n" + \
+    "│" + "│".join(_pad_cell(name, w) for name, w in ACCESS_TABLE_WIDTHS) + "│\n" + \
     _border_line("├", "┼", "┤", "─")
 ACCESS_TABLE_FOOTER = _border_line("└", "┴", "┘", "─")
 
@@ -104,27 +148,20 @@ def print_access_header_once():
 def _color_for_tag(tag: str) -> str:
     return {"IMAGE": CLR["cyan"], "ACTION": CLR["magenta"], "API": CLR["blue"], "INFO": CLR["white"]}.get(tag, "")
 
-def _color_for_status(sts: int) -> str:
-    if 200 <= sts < 300: return CLR["green"]
-    if 300 <= sts < 400: return CLR["yellow"]
+def _color_for_status(sts) -> str:
+    try:
+        code = int(sts)
+    except Exception:
+        return CLR["white"]  # 상태코드 없음('-') → 흰색
+    if 200 <= code < 300: return CLR["green"]
+    if 300 <= code < 400: return CLR["yellow"]
     return CLR["red"]
 
 def _color_for_method(m: str) -> str:
     m = (m or "").upper()
     return {"GET": CLR["cyan"], "POST": CLR["yellow"], "DELETE": CLR["red"], "PUT": CLR["magenta"]}.get(m, CLR["white"])
 
-def _short_note_path(p: str) -> str:
-    """NOTE 칼럼에 넣을 짧은 경로(뒤 2~3 세그먼트만)"""
-    if not p:
-        return ""
-    s = str(p).replace("\\", "/")
-    segs = [x for x in s.split("/") if x]
-    if len(segs) <= 3:  # 짧으면 그대로
-        return s
-    return "…/" + "/".join(segs[-3:])
-
 def shorten_note_path(abs_path: str, root_dir: str) -> str:
-    """NOTE 컬럼에서 루트 경로 생략하고 상대경로만 표시"""
     try:
         p = Path(abs_path).resolve()
         r = Path(root_dir).resolve()
@@ -151,42 +188,37 @@ def _note_from_request(request: Request, endpoint: str) -> str:
         return "[클래스]"
     return ""
 
-def log_access_row(*, tag: str, ip: str = "-", method: str = "-", status: int = 0,
+def log_access_row(*, tag: str, ip: str = "-", method: str = "-", status: str = "-",
                    path: str = "-", note: str = ""):
-    """ANSI 길이를 무시하고 고정폭 정렬: 먼저 평문 패딩 → 그 위에 색 입힘."""
+    """셀을 wcwidth 기준으로 패딩해 열 경계를 항상 맞춤."""
     global _access_count
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1) 평문 셀 만들기 (ACCESS_TABLE_WIDTHS 사용)
     plain_cells = {}
     for col_name, width in ACCESS_TABLE_WIDTHS:
         if col_name == "TAG":
-            plain_cells[col_name] = _pad_plain(tag, width)
+            plain_cells[col_name] = _pad_cell(tag, width)
         elif col_name == "TIME":
-            plain_cells[col_name] = _pad_plain(ts, width)
+            plain_cells[col_name] = _pad_cell(ts, width)
         elif col_name == "IP":
-            plain_cells[col_name] = _pad_plain(ip, width)
+            plain_cells[col_name] = _pad_cell(ip, width)
         elif col_name == "METHOD":
-            plain_cells[col_name] = _pad_plain((method or "").upper(), width)
+            plain_cells[col_name] = _pad_cell((method or "").upper(), width)
         elif col_name == "STS":
-            plain_cells[col_name] = _pad_plain(str(status), width)
+            plain_cells[col_name] = _pad_cell(str(status), width)
         elif col_name == "PATH":
-            plain_cells[col_name] = _pad_plain(path, width)
+            plain_cells[col_name] = _pad_cell(path, width)
         elif col_name == "NOTE":
-            plain_cells[col_name] = _pad_plain(note, width)
+            plain_cells[col_name] = _pad_cell(note, width)
 
-    # 2) 색상 적용(중요도 높은 것만)
-    tag_col = f"{_color_for_tag(tag)}{plain_cells['TAG']}{CLR['reset']}"
+    tag_col    = f"{_color_for_tag(tag)}{plain_cells['TAG']}{CLR['reset']}"
     method_col = f"{_color_for_method(method)}{plain_cells['METHOD']}{CLR['reset']}"
-    sts_col = f"{_color_for_status(int(status))}{plain_cells['STS']}{CLR['reset']}"
-    path_col = f"{CLR['dim']}{plain_cells['PATH']}{CLR['reset']}"  # PATH는 흐리게
-    # NOTE 색상: 이미지/액션은 눈에 띄게
+    sts_col    = f"{_color_for_status(status)}{plain_cells['STS']}{CLR['reset']}"
+    path_col   = f"{CLR['dim']}{plain_cells['PATH']}{CLR['reset']}"
     note_color = CLR["white"] if tag == "IMAGE" else (CLR["magenta"] if tag == "ACTION" else "")
-    note_col = f"{note_color}{plain_cells['NOTE']}{CLR['reset']}" if note_color else plain_cells["NOTE"]
+    note_col   = f"{note_color}{plain_cells['NOTE']}{CLR['reset']}" if note_color else plain_cells["NOTE"]
 
-    cells = [
-        tag_col, plain_cells["TIME"], plain_cells["IP"], method_col, sts_col, path_col, note_col
-    ]
+    cells = [tag_col, plain_cells["TIME"], plain_cells["IP"], method_col, sts_col, path_col, note_col]
     _access_table_logger.info("│" + "│".join(cells) + "│")
 
     _access_count += 1
@@ -236,22 +268,18 @@ class LRUCache:
         self.capacity = capacity
         self._cache: OrderedDict[str, Any] = OrderedDict()
         self._lock = RLock()
-
     def get(self, key: str):
         with self._lock:
             val = self._cache.get(key)
             if val is None: return None
             self._cache.move_to_end(key);  return val
-
     def set(self, key: str, value: Any):
         with self._lock:
             if key in self._cache: self._cache.move_to_end(key)
             self._cache[key] = value
             if len(self._cache) > self.capacity: self._cache.popitem(last=False)
-
     def delete(self, key: str):
         with self._lock: self._cache.pop(key, None)
-
     def clear(self):
         with self._lock: self._cache.clear()
 
@@ -263,7 +291,6 @@ class TTLCache:
         self.capacity = capacity
         self._data: OrderedDict[str, Tuple[float, Any]] = OrderedDict()
         self._lock = RLock()
-
     def get(self, key: str):
         now = time.time()
         with self._lock:
@@ -273,14 +300,12 @@ class TTLCache:
             if exp < now:
                 del self._data[key];  return None
             self._data.move_to_end(key);  return val
-
     def set(self, key: str, value: Any):
         now = time.time()
         with self._lock:
             if key in self._data: self._data.move_to_end(key)
             self._data[key] = (now + self.ttl, value)
             if len(self._data) > self.capacity: self._data.popitem(last=False)
-
     def clear(self):
         with self._lock: self._data.clear()
 
@@ -289,7 +314,7 @@ THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 # ======================== FastAPI & Middleware ========================
 app = FastAPI(title="L3Tracker API", version="2.6.0")
 
-# -------- User-First flags --------
+# ---- 사용자 우선 플래그 ----
 def set_user_activity():
     global USER_ACTIVITY_FLAG, BACKGROUND_TASKS_PAUSED
     USER_ACTIVITY_FLAG = True;  BACKGROUND_TASKS_PAUSED = True
@@ -313,7 +338,7 @@ async def delayed_background_resume():
     BACKGROUND_TASKS_PAUSED = False
     clear_user_activity()
 
-# -------- No-store for labels/classes --------
+# ---- 라벨/클래스 노스토어 ----
 @app.middleware("http")
 async def no_store_for_labels_and_classes(request: Request, call_next):
     response = await call_next(request)
@@ -324,7 +349,7 @@ async def no_store_for_labels_and_classes(request: Request, call_next):
         response.headers["Expires"] = "0"
     return response
 
-# -------- Access table log middleware (단일 출력) --------
+# ---- 액세스 테이블 로그 ----
 class AccessTrackingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -334,12 +359,10 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         method = request.method
         status = response.status_code
 
-        # 제외 경로 (통계 기록도 제외)
         skip_prefix = ["/favicon.ico", "/static/", "/js/", "/api/files/all", "/api/stats", "/api/stats/", "/stats"]
         if any(endpoint.startswith(p) for p in skip_prefix):
             return response
 
-        # 태그 분류
         if endpoint.startswith(("/api/thumbnail", "/api/image")):
             tag = "IMAGE"
         elif endpoint.startswith("/api/classify"):
@@ -347,15 +370,12 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         else:
             tag = "API"
 
-        # 통계 업데이트 (새로 추가)
         try:
             logger_instance._update_stats(client_ip, endpoint, method)
-        except Exception as e:
+        except Exception:
             pass
-
-        # 내부 통계만 기록(콘솔은 우리가 처리)
         try:
-            logger_instance.log_access(request, endpoint, status, console=False)  # 구현에 따라 무시될 수 있음
+            logger_instance.log_access(request, endpoint, status, console=False)
         except Exception:
             pass
 
@@ -397,7 +417,6 @@ def relkey_from_any_path(any_path: str) -> str:
     abs_path = safe_resolve_path(any_path)
     return str(abs_path.relative_to(ROOT_DIR)).replace("\\", "/")
 
-# ----- labels/classes sync helpers -----
 def _classification_dir() -> Path:
     return ROOT_DIR / "classification"
 
@@ -485,14 +504,9 @@ def _labels_load():
         except Exception:
             LABELS_MTIME = time.time()
 
-        # ✅ 여기서 일반 logger.info 대신 표 형식 로그 출력
-        log_access_row(
-            tag="INFO",
-            note=f"라벨 로드: {len(LABELS)}개 이미지 (mtime={LABELS_MTIME:.5f})"
-        )
+        log_access_row(tag="INFO", note=f"라벨 로드: {len(LABELS)}개 이미지 (mtime={LABELS_MTIME:.5f})")
     except Exception as e:
         logger.error(f"라벨 로드 실패: {e}")
-
 
 def _labels_save():
     global LABELS_MTIME
@@ -503,13 +517,14 @@ def _labels_save():
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(LABELS, f, ensure_ascii=False, indent=2)
             os.replace(tmp, LABELS_FILE)
-        try: 
+        try:
             LABELS_MTIME = LABELS_FILE.stat().st_mtime
-        except Exception: 
+        except Exception:
             LABELS_MTIME = time.time()
     except Exception as e:
         logger.error(f"라벨 저장 실패: {e}")
         raise HTTPException(status_code=500, detail="Failed to save labels")
+
 # ======================== Directory Listing / Index ========================
 def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     no_cache_paths = ["classification", "images", "labels"]
@@ -637,7 +652,6 @@ class ClassifyDeleteRequest(BaseModel):
     class_name: str
 
 # ======================== Endpoints ========================
-# Files / Images / Search
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None):
     try:
@@ -686,7 +700,7 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
 
 @app.get("/api/search")
 async def search_files(q: str = Query(..., description="파일명 검색(대소문자 무시, 부분일치)"),
-    limit: int = Query(500, ge=1, le=5000),
+                       limit: int = Query(500, ge=1, le=5000),
                        offset: int = Query(0, ge=0)):
     try:
         query = (q or "").strip().lower()
@@ -916,95 +930,24 @@ async def get_labels(image_path: str, _=Depends(labels_classes_sync_dep)):
         logger.exception(f"라벨 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ---------------- Classify ----------------
-@app.post("/api/classify")
-async def classify_image(req: ClassifyRequest, _=Depends(labels_classes_sync_dep)):
-    try:
-        if not req.image_path or not req.class_name:
-            raise HTTPException(status_code=400, detail="이미지 경로와 클래스명이 필요합니다")
-        image_path = req.image_path.strip();  class_name = req.class_name.strip()
-        full_image_path = safe_resolve_path(image_path)
-        if not full_image_path.exists() or not full_image_path.is_file():
-            raise HTTPException(status_code=404, detail="이미지 파일을 찾을 수 없습니다")
-        class_dir = _classification_dir() / class_name;  class_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(full_image_path, class_dir / full_image_path.name)
-        rel = relkey_from_any_path(image_path)
-        with LABELS_LOCK:
-            if rel not in LABELS: LABELS[rel] = []
-            if class_name not in LABELS[rel]: LABELS[rel].append(class_name)
-        _labels_save();  _dircache_invalidate(_classification_dir()); _dircache_invalidate(class_dir)
-        log_access_row(tag="INFO", note=f"이미지 분류: {image_path} -> {class_name}")
-        return {"success": True, "message": f"이미지 '{image_path}'이 클래스 '{class_name}'으로 분류되었습니다",
-                "image": rel, "class": class_name}
-    except Exception as e:
-        logger.exception(f"이미지 분류 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/classify/delete")
-async def delete_classification(req: ClassifyDeleteRequest, _=Depends(labels_classes_sync_dep)):
-    try:
-        if not req.class_name: raise HTTPException(status_code=400, detail="클래스명이 필요합니다")
-        class_name = req.class_name.strip()
-        if not req.image_path and not req.image_name:
-            raise HTTPException(status_code=400, detail="이미지 경로 또는 이미지 파일명이 필요합니다")
-
-        class_dir = _classification_dir() / class_name
-        if not class_dir.exists(): raise HTTPException(status_code=404, detail="클래스를 찾을 수 없습니다")
-
-        image_file = class_dir / (req.image_name.strip() if req.image_name else Path(req.image_path.strip()).name)
-        if not image_file.exists(): raise HTTPException(status_code=404, detail="해당 클래스에 이미지가 없습니다")
-
-        image_file.unlink()
-        removed_from: List[str] = []
-        with LABELS_LOCK:
-            if req.image_path:
-                rel = relkey_from_any_path(req.image_path)
-                labs = LABELS.get(rel, [])
-                if class_name in labs:
-                    LABELS[rel] = [x for x in labs if x != class_name]
-                    if not LABELS[rel]: LABELS.pop(rel, None)
-                    removed_from.append(rel)
-            else:
-                fname = image_file.name
-                for rel, labs in list(LABELS.items()):
-                    if Path(rel).name == fname and class_name in labs:
-                        LABELS[rel] = [x for x in labs if x != class_name]
-                        if not LABELS[rel]: LABELS.pop(rel, None)
-                        removed_from.append(rel)
-        if removed_from: _labels_save()
-        _dircache_invalidate(_classification_dir()); _dircache_invalidate(class_dir)
-        return {"success": True, "message": f"이미지 '{image_file.name}'의 클래스 '{class_name}' 분류를 제거했습니다",
-                "removed_from": removed_from}
-    except Exception as e:
-        logger.exception(f"분류 제거 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # ---------------- Stats passthrough ----------------
 @app.get("/api/stats/daily")
 async def get_daily_stats(): return logger_instance.get_daily_stats()
-
 @app.get("/api/stats/trend")
 async def get_trend_stats(days: int = Query(7, ge=1, le=30)): return logger_instance.get_daily_trend(days)
-
 @app.get("/api/stats/monthly")
 async def get_monthly_stats(months: int = Query(3, ge=1, le=12)): return logger_instance.get_monthly_trend(months)
-
 @app.get("/api/stats/users")
 async def get_users_stats(): return logger_instance.get_users_stats()
-
 @app.get("/api/stats/recent-users")
 async def get_recent_users(): return logger_instance.get_recent_users()
-
 @app.get("/api/stats/user/{user_id}")
 async def get_user_detail(user_id: str):
     user_detail = logger_instance.get_user_detail(user_id)
     if user_detail is None: raise HTTPException(status_code=404, detail="User not found")
     return user_detail
-
 @app.get("/api/stats/active-users")
-async def get_active_users():
-    """현재 활성 사용자 목록"""
-    return logger_instance.get_active_users()
+async def get_active_users(): return logger_instance.get_active_users()
 
 # ---------------- Static / Pages ----------------
 app.mount("/js", StaticFiles(directory="js"), name="js")
@@ -1113,12 +1056,31 @@ async def browse_folders(path: Optional[str] = None):
 async def startup_event():
     bootlog = logging.getLogger("uvicorn.error")
     bootlog.info("🚀 L3Tracker 서버 시작 (테이블 로그 시스템)")
+    scheme = "HTTPS" if config.SSL_ENABLED else "HTTP"
+    port_to_log = config.HTTPS_PORT if config.SSL_ENABLED else config.DEFAULT_PORT
     bootlog.info(f"📍 호스트: {config.DEFAULT_HOST}")
-    bootlog.info(f"🔌 포트: {config.DEFAULT_PORT}")
+    bootlog.info(f"🔌 포트: {port_to_log} ({scheme})")
     bootlog.info(f"📁 ROOT_DIR: {config.ROOT_DIR}")
     bootlog.info(f"🔧 PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}")
     bootlog.info("=" * 50)
     print_access_header_once()
+
+    # asyncio 소음 예외 억제(10054 등)
+    try:
+        loop = asyncio.get_running_loop()
+        default_handler = loop.get_exception_handler()
+        def _silence_asyncio(loop, context):
+            exc = context.get('exception')
+            msg = str(context.get('message', ''))
+            if isinstance(exc, (ConnectionResetError,)):
+                return
+            if "WinError 10054" in msg:
+                return
+            if default_handler:
+                default_handler(loop, context)
+        loop.set_exception_handler(_silence_asyncio)
+    except Exception:
+        pass
 
     _classification_dir().mkdir(parents=True, exist_ok=True)
     _labels_load()
@@ -1133,14 +1095,32 @@ async def shutdown_event():
 # ======================== __main__ ========================
 if __name__ == "__main__":
     import uvicorn
+
+    if not config.SSL_ENABLED:
+        logger.error("[SSL] SSL_ENABLED=0 입니다. 이 실행파일은 HTTPS만 지원합니다.")
+        sys.exit(2)
+
+    cert_path = Path(str(config.SSL_CERTFILE)).resolve()
+    key_path  = Path(str(config.SSL_KEYFILE)).resolve()
+    if not cert_path.exists() or not key_path.exists():
+        logger.error(f"[SSL] 인증서/키 파일이 없습니다.\n  CERT: {cert_path}\n  KEY : {key_path}")
+        sys.exit(2)
+
+    reload_flag = os.getenv("RELOAD", "1") == "1"
+    logger.info(f"[SSL] HTTPS 모드 활성화: 포트 {config.HTTPS_PORT}")
+    logger.info(f"[SSL] CERTFILE={cert_path}")
+    logger.info(f"[SSL] KEYFILE={key_path}")
+
     uvicorn.run(
-        app,
-        host=config.DEFAULT_HOST,
-        port=config.DEFAULT_PORT,
-        reload=config.DEFAULT_RELOAD,
-        workers=config.DEFAULT_WORKERS,
+        "api.main:app",
+        host="0.0.0.0",
+        port=int(config.HTTPS_PORT),        # 기본 8443
+        reload=reload_flag,                 # 개발 편의
+        workers=1,                          # reload 사용 시 1 고정
         log_level="info",
-        access_log=False,  # uvicorn access 로그 비활성화 (커스텀 테이블 사용)
+        access_log=False,                   # 커스텀 테이블 로그 사용
         use_colors=True,
         log_config=None,
+        ssl_certfile=str(cert_path),
+        ssl_keyfile=str(key_path),
     )

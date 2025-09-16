@@ -1,3 +1,15 @@
+## [2.6.0] - 2025-09-16
+
+### ✨ Added
+- 기본 HTTPS(8443) 실행 경로 정리 및 문서 반영
+- 콘솔 테이블형 Access Log(고정폭 컬럼/ANSI 색상) 소개 문서화
+
+### 🐛 Fixed
+- Windows 환경에서 브라우저가 먼저 연결을 끊을 때 콘솔에 보이던 소켓 노이즈 설명/완화
+
+### 🔄 Changed
+- 라벨 경로 문서 표기를 `classification/labels.json`로 통일
+
 # Changelog
 
 All notable changes to L3Tracker will be documented in this file.

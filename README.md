@@ -56,11 +56,15 @@ ROOT_DIR = Path("D:/project/data/wm-811k")  # Your dataset path
 
 ### 4. Run Server
 ```bash
-# Standard method
+# (개발) HTTP 8080
 uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
 
-# Or with module
+# (운영/Windows 기본) HTTPS 8443 + 인증서
 python -m api.main
+# 또는
+uvicorn api.main:app --host 0.0.0.0 --port 8443 \
+  --ssl-certfile "D:\project\l3tracker\cert\fullchain.pem" \
+  --ssl-keyfile  "D:\project\l3tracker\cert\server.key"
 ```
 
 ### 5. Open Browser
@@ -109,7 +113,7 @@ l3tracker/
 2. **Select Images**: Choose images to classify
 3. **Apply Labels**: Click class button to label selected images
 4. **View Results**: Check Label Explorer for organized view
-5. **Export Data**: Labels saved in `labels/labels.json`
+5. **Export Data**: Labels saved in `classification/labels.json`
 
 ### Advanced Search
 ```
@@ -137,7 +141,8 @@ Edit `api/config.py` for customization:
 # Paths
 ROOT_DIR = Path("D:/project/data/wm-811k")
 THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
-LABELS_DIR = ROOT_DIR / "labels"
+# 라벨 DB는 classification 폴더(labels.json) 사용
+LABELS_DIR = ROOT_DIR / "classification"
 
 # Performance
 IO_THREADS = 32  # Concurrent I/O operations

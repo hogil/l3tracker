@@ -98,7 +98,7 @@ L3Tracker is a high-performance web application built with a modern, scalable ar
 ROOT_DIR/
 ├── images/           # Original images
 ├── thumbnails/       # Generated thumbnails
-├── labels/          
+├── classification/   # Label database root
 │   └── labels.json  # Label database
 └── classification/   # Organized by classes
     ├── class1/
@@ -199,6 +199,8 @@ def safe_resolve_path(path):
 
 ### 1. Logging
 ```python
+# uvicorn.access 기본 로그는 비활성화하고,
+# 표형 Access Log(ANSI 색/고정폭 컬럼)를 콘솔로 출력합니다.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -237,8 +239,13 @@ logging.basicConfig(
 # Install dependencies
 pip install -r requirements.txt
 
-# Run with auto-reload
+# (개발) HTTP 8080 + reload
 uvicorn api.main:app --reload --host 0.0.0.0 --port 8080
+
+# (운영/Windows) HTTPS 8443 + 인증서
+python -m api.main
+# 또는 uvicorn에 인증서 직접 지정
+# uvicorn api.main:app --host 0.0.0.0 --port 8443 --ssl-certfile <...> --ssl-keyfile <...>
 ```
 
 ### Testing

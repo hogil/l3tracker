@@ -62,14 +62,17 @@ sudo tail -f /opt/l3tracker/logs/error.log    # 에러 로그
 
 #### **개발 환경**
 ```
-http://localhost:8080
+(개발) http://localhost:8080
 ```
 
 #### **프로덕션 환경 (설치 후)**
 ```
-http://서버IP        # Nginx를 통해 포트 80으로 접속
-http://서버IP:8080   # 직접 접속
+https://서버도메인   # Nginx(HTTPS) 리버스 프록시 권장
+http://서버IP:8080   # 백엔드 직접 접속(개발/점검용)
 ```
+
+> 운영에서는 Nginx로 TLS 종단(443) → 백엔드 8080/8443 프록시를 권장합니다.
+> 자체 인증서 사용 시 uvicorn에 --ssl-*- 옵션 또는 `python -m api.main`(Windows) 사용.
 
 ### **🔄 자동 재시작 기능**
 

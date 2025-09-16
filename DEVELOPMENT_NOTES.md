@@ -1,6 +1,13 @@
 # Development Notes - 2024-12-28
 
 ## 최근 주요 개발 사항
+### 6. Access Log 테이블화
+- uvicorn 기본 access 로그 비활성화, 컬럼형 콘솔 로그 도입(색상/고정폭/요약 NOTE)
+- 장점: 대량 썸네일 요청 시에도 한 줄/한 컬럼 정렬로 가독성↑
+
+### 7. HTTPS 실행 플로우
+- Windows: `python -m api.main` 기본(8443/TLS 필수)
+- uvicorn 수동 실행 시 `--ssl-certfile/--ssl-keyfile` 사용
 
 ### 1. 폴더 브라우저 시스템 구현
 - **목적**: 사용자가 이미지 폴더를 쉽게 변경하고 하위폴더를 탐색할 수 있도록 함
