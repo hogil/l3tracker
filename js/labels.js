@@ -543,9 +543,96 @@ export class LabelManager {
      * Label Explorer 새로고침
      */
     async refreshLabelExplorer() {
-        // 구현은 기존 main.js의 refreshLabelExplorer 로직을 여기로 이동
-        // 복잡한 로직이므로 여기서는 스켈레톤만 제공
-        console.log('Label Explorer 새로고침');
+        const container = this.elements.labelExplorerList;
+        if (!container) return;
+
+        // 클래스 목록 불러오기
+        let classes = [];
+        try {
+            const res = await fetch('/api/classes');
+            if (!res.ok) throw new Error('클래스 목록 조회 실패');
+            const data = await res.json();
+            classes = data.classes || [];
+        } catch (e) {
+            console.error('Label Explorer 클래스 조회 오류:', e);
+            container.innerHTML = '<p style="color:#f00;">클래스를 불러올 수 없습니다.</p>';
+            return;
+        }
+
+        const frag = document.createDocumentFragment();
+
+        for (const className of classes) {
+            // 클래스 헤더
+            const header = document.createElement('div');
+            header.className = 'label-explorer-class';
+            header.textContent = className;
+            frag.appendChild(header);
+
+            // 이미지 목록 컨테이너
+            const list = document.createElement('div');
+            list.className = 'label-explorer-list';
+            frag.appendChild(list);
+
+            // 이미지 목록 조회
+            try {
+                const res = await fetch(`/api/classes/${encodeURIComponent(className)}/images?limit=1000`);
+                if (!res.ok) throw new Error('이미지 조회 실패');
+                const data = await res.json();
+                const images = data.results || [];
+
+                if (images.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'label-explorer-empty';
+                    empty.textContent = '라벨된 이미지 없음';
+                    list.appendChild(empty);
+                    continue;
+                }
+
+                for (const imagePath of images) {
+                    const row = document.createElement('div');
+                    row.className = 'label-explorer-item';
+
+                    const name = document.createElement('span');
+                    name.className = 'label-explorer-name';
+                    name.textContent = imagePath.split('/').pop();
+                    name.title = imagePath;
+                    row.appendChild(name);
+
+                    const del = document.createElement('button');
+                    del.className = 'label-explorer-del';
+                    del.textContent = '삭제';
+                    del.addEventListener('click', async () => {
+                        try {
+                            const res = await fetch('/api/labels', {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ image_path: imagePath, labels: [className] })
+                            });
+                            if (!res.ok) {
+                                const err = await res.json().catch(() => ({}));
+                                throw new Error(err.error || `삭제 실패(${res.status})`);
+                            }
+                            await this.refreshAll();
+                        } catch (err) {
+                            console.error('라벨 삭제 오류:', err);
+                            alert(`라벨 삭제 실패: ${err.message || err}`);
+                        }
+                    });
+                    row.appendChild(del);
+
+                    list.appendChild(row);
+                }
+            } catch (e) {
+                console.error('Label Explorer 이미지 조회 오류:', e);
+                const err = document.createElement('div');
+                err.style.color = '#f00';
+                err.textContent = '이미지 목록을 불러올 수 없습니다.';
+                list.appendChild(err);
+            }
+        }
+
+        container.innerHTML = '';
+        container.appendChild(frag);
     }
     
     /**
