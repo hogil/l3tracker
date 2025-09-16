@@ -16,48 +16,118 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+.pytest_cache/
+.coverage
+*.cover
+.hypothesis/
 
 # Virtual Environment
 venv/
-env/
 ENV/
+env/
+.venv/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
+*~
 .DS_Store
-Thumbs.db
 
-# Thumbnails cache
-thumbnails/
-.thumbnails/
-
-# Classification data (사용자가 추가할 데이터)
-classification/
-
-# Large image files
-*.jpg
-*.jpeg
-*.png
-*.bmp
-*.gif
-*.tiff
-*.webp
-
-# Logs
-*.log
+# Project specific
 logs/
+*.log
+thumbnails/
+classification/
+labels/
+*.db
+*.sqlite
+*.sqlite3
+config.json
+settings.json
 
 # Temporary files
+*.tmp
+*.bak
+*.backup
+.temp/
 tmp/
-temp/ 
+
+# Images (large files)
+images/
+*.tif
+*.tiff
+*.bmp
+large_images/
+
+# Model files
+*.h5
+*.pkl
+*.pth
+*.onnx
+models/
+
+# Cache
+.cache/
+cache/
+__pycache__/
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# SSL Certificates
+cert/
+*.pem
+*.key
+*.crt
+*.csr
+
+# Node (if using)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+Thumbs.db
+Desktop.ini
+
+# Backup files
+*.orig
+*.rej
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Custom
+private/
+confidential/
+data/
+dataset/

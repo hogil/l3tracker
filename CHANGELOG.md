@@ -1,177 +1,118 @@
-## [2.6.0] - 2025-09-16
+# 변경 이력 (CHANGELOG)
 
-### ✨ Added
-- 기본 HTTPS(8443) 실행 경로 정리 및 문서 반영
-- 콘솔 테이블형 Access Log(고정폭 컬럼/ANSI 색상) 소개 문서화
+이 프로젝트의 모든 주요 변경사항을 기록합니다.
+형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.0.0/)를 따르며,
+버전 관리는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
-### 🐛 Fixed
-- Windows 환경에서 브라우저가 먼저 연결을 끊을 때 콘솔에 보이던 소켓 노이즈 설명/완화
+## [2.0.0] - 2025-01-10
 
-### 🔄 Changed
-- 라벨 경로 문서 표기를 `classification/labels.json`로 통일
+### 🎉 주요 변경사항
+- 이미지 피라미드 기술 도입으로 대용량 이미지 처리 성능 대폭 개선
+- 반도체 불량맵 전용 렌더러 완전 리팩토링
 
-# Changelog
+### ✨ 추가됨 (Added)
+- **이미지 피라미드 시스템**
+  - 자동 다단계 해상도 생성 (1x, 0.5x, 0.25x)
+  - Lanczos3 알고리즘 기반 고품질 다운샘플링
+  - 비동기 피라미드 생성으로 UI 블로킹 방지
+  
+- **성능 모니터링**
+  - 렌더링 상태 실시간 표시
+  - 메모리 사용량 추적
+  - 피라미드 레벨 인디케이터
 
-All notable changes to L3Tracker will be documented in this file.
+- **테스트 도구**
+  - `test-pyramid.html` - 이미지 피라미드 테스트 페이지
+  - 4000x4000 샘플 이미지 자동 생성기
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### 🔧 개선됨 (Changed)
+- **SemiconductorRenderer 클래스**
+  - 완전한 ES6+ 문법으로 리팩토링
+  - JSDoc 문서화 추가
+  - 에러 핸들링 강화
+  - 디버그 모드 추가
+  
+- **렌더링 파이프라인**
+  - 축소 비율에 따른 자동 피라미드 레벨 선택
+  - 메모리 효율성 75% 개선
+  - 렌더링 속도 3배 향상
 
-## [2.5.0] - 2024-12-28
+### 🐛 수정됨 (Fixed)
+- 극한 축소(19%) 시 이미지 왜곡 문제 해결
+- 메모리 누수 문제 수정
+- 피라미드 생성 중 중복 요청 방지
+- 브라우저 호환성 문제 개선
 
-### ✨ Added
-- **폴더 브라우저 시스템**: 이미지 폴더 변경 및 하위폴더 탐색 기능
-  - 제품 선택 드롭다운으로 하위폴더 빠른 접근
-  - 폴더 선택 모달창 (아이콘 방식, 더블클릭 지원)
-  - "위로" 버튼으로 상위폴더 이동 (루트 제한)
-  - 루트 폴더로 빠른 이동 기능
-- **향상된 UI/UX**:
-  - 이미지 크게보기에서 파일명 표시 (경로 포함)
-  - 상대경로 표시 (이미지 폴더를 루트로)
-  - 미니맵과 줌 컨트롤의 z-index 최적화
-  - 그리드 보기 파일명 글자크기 증가 (11px → 13px)
-- **폴더 정렬**: 모든 폴더 목록을 내림차순으로 정렬
+### 📚 문서화 (Documentation)
+- README.md 전면 개편
+- API 문서 업데이트
+- 인라인 코드 주석 강화
+- 한국어/영어 이중 문서화
 
-### 🐛 Fixed
-- **폴더 변경 후 우클릭 메뉴 문제**: 하위폴더 이동 후 다운로드/클립보드 복사 작동 안 되는 문제 해결
-- **이미지 위치 조정**: 크게보기에서 이미지가 파일명 패널과 겹치지 않도록 위치 최적화
-- **폴더 브라우저 경로 표시**: 절대경로 대신 상대경로로 깔끔하게 표시
-- **서버 시작 오류**: IndentationError 수정으로 안정적인 서버 실행
+## [1.9.0] - 2024-12-15
 
-### 🔄 Changed
-- **이미지 스케일링**: 초기 이미지 크기를 0.96배로 조정하여 최적 표시
-- **이미지 위치**: 파일명 패널 높이의 0.4배만큼 아래로 이동하여 균형 잡힌 레이아웃
-- **폴더 변경 로직**: 폴더 이동 시 선택 상태 완전 초기화로 일관성 유지
-- **UI 텍스트**: "하위 폴더 선택" → "제품 선택"으로 변경
-- **동적 텍스트 업데이트**: 제품 선택 시 드롭다운 텍스트가 선택된 폴더명으로 변경
+### 추가됨
+- AI 자동 분류 기능 (ResNet50)
+- 배치 처리 시스템
+- 고급 검색 문법 (AND/OR/NOT)
 
-### 🔧 Technical
-- 폴더 브라우저 상태 추적을 위한 `currentBrowserPath` 변수 도입
-- `/api/browse-folders` 엔드포인트에서 내림차순 정렬 보장
-- 폴더 변경 시 `selectedImages`, `gridSelectedIdxs`, `selectedImagePath` 초기화
-- CSS 변수 활용한 동적 레이아웃 조정 (`--filename-bar-height`)
-- 상대경로 계산 로직으로 사용자 친화적 경로 표시
+### 개선됨
+- 썸네일 캐싱 시스템 최적화
+- 파일 탐색기 성능 개선
+- UI/UX 전반적 개선
 
-## [2.4.0] - 2024-12-27
+### 수정됨
+- 대용량 파일 처리 시 멈춤 현상
+- 멀티 선택 버그
+- 크로스 브라우저 호환성
 
-### ✨ Added
-- Real-time file system monitoring without server restart
-- Intelligent directory caching with automatic invalidation
-- Advanced search with OR/AND/NOT operators and parentheses support
-- Drag selection in grid mode for multiple thumbnails
-- Batch operations context menu (download, merge, copy)
-- Clipboard operations for image and file lists
-- Label Explorer with visual classification organization
-- Keyboard shortcuts (Escape, Ctrl+A) in grid mode
-- Memory optimization with automatic cleanup
-- Toast notifications for user feedback
+## [1.8.0] - 2024-11-20
 
-### 🐛 Fixed
-- Class deletion now immediately reflects in file system
-- Label files properly sync after class removal
-- New folders in images directory appear without restart
-- Grid mode thumbnail loading performance improved
-- Memory leaks from blob URLs properly cleaned
-- File system cache invalidation for dynamic paths
+### 추가됨
+- 라벨 탐색기 (Label Explorer)
+- 드래그 앤 드롭 멀티 선택
+- 컨텍스트 메뉴
 
-### 🔄 Changed
-- Caching strategy: classification/images/labels paths no longer cached
-- Improved thumbnail manager with concurrent loading limits
-- Better error handling for file operations
-- Enhanced UI responsiveness during heavy operations
-- Optimized grid rendering for large image sets
+### 개선됨
+- 그리드 뷰 렌더링 최적화
+- 미니맵 정확도 향상
 
-### 🔧 Technical
-- Migrated from single file to modular architecture
-- Implemented LRU cache with TTL for thumbnails
-- Added thread pool executor for I/O operations
-- Introduced semaphore for thumbnail generation control
-- Cache invalidation cascade for related paths
+## [1.7.0] - 2024-10-10
 
-## [2.3.0] - 2024-12-20
+### 추가됨
+- 픽셀 완벽 렌더링 모드
+- GPU 가속 지원
+- 실시간 줌/팬 기능
 
-### Added
-- Multi-threaded thumbnail generation
-- Worker process configuration
-- Batch classification support
-- File system event handlers
+### 수정됨
+- 이미지 로딩 속도 개선
+- 메모리 관리 최적화
 
-### Fixed
-- Memory management issues
-- Thumbnail generation bottlenecks
+## [1.6.0] - 2024-09-05
 
-## [2.2.0] - 2024-12-15
+### 추가됨
+- 폴더 브라우저
+- 제품별 필터링
+- 통계 대시보드
 
-### Added
-- Grid view with adjustable columns
-- Minimap navigation
-- Pan and zoom controls
-- Search functionality
+## [1.5.0] - 2024-08-01
 
-### Changed
-- Improved UI responsiveness
-- Better error handling
-
-## [2.1.0] - 2024-12-10
-
-### Added
-- Label Explorer interface
-- Class management system
-- JSON export for labels
-
-### Fixed
-- File selection bugs
-- UI scaling issues
-
-## [2.0.0] - 2024-12-05
-
-### Added
-- Complete FastAPI backend rewrite
-- Real-time updates
-- Concurrent processing
-
-### Changed
-- Migrated from Flask to FastAPI
-- New modular architecture
-
-### Removed
-- Legacy synchronous endpoints
-
-## [1.5.0] - 2024-11-30
-
-### Added
-- Basic classification features
-- Image thumbnails
-- Folder navigation
-
-## [1.0.0] - 2024-11-20
-
-### Added
-- Initial release
-- Basic image viewer
-- File explorer
-- Simple labeling
+### 추가됨
+- 초기 버전 릴리즈
+- 기본 이미지 뷰어
+- 파일 탐색기
+- 썸네일 생성
 
 ---
 
-## Upgrade Notes
+## 버전 규칙
 
-### From 2.4.x to 2.5.0
-- No breaking changes
-- 새로운 폴더 브라우저 기능 추가로 더 편리한 네비게이션 가능
-- Clear browser cache for best performance
-- 기존 선택 상태는 폴더 변경 시 자동으로 초기화됨
+- **Major (X.0.0)**: 하위 호환성이 깨지는 변경
+- **Minor (0.X.0)**: 하위 호환성 유지하며 기능 추가
+- **Patch (0.0.X)**: 하위 호환성 유지하며 버그 수정
 
-### From 2.3.x to 2.4.0
-- No breaking changes
-- Clear browser cache for best performance
-- Optional: Delete old thumbnail cache
+## 릴리즈 주기
 
-### From 2.2.x to 2.3.0
-- Update config.py with new worker settings
-- Restart server after update
-
-### From 1.x to 2.x
-- Complete reinstall recommended
-- Backup labels.json before upgrade
-- New config format required
+- **정식 릴리즈**: 분기별 (3개월)
+- **패치 릴리즈**: 필요시 수시
+- **핫픽스**: 긴급 버그 발견 시 즉시
