@@ -486,6 +486,35 @@ def _remove_label_from_all_images(label_name: str) -> int:
         log_access_row(tag="INFO", note=f"라벨 완전 삭제: '{label_name}' → {removed}개 이미지에서 제거")
     return removed
 
+# ----- classification links (for Label Explorer) -----
+def _class_link_path(class_name: str, rel_image_path: str) -> Path:
+    """클래스 디렉토리 아래에 원본 상대경로 구조를 유지한 링크/복제 경로"""
+    return (_classification_dir() / class_name / rel_image_path).resolve()
+
+def _ensure_class_link(class_name: str, rel_image_path: str) -> None:
+    """분류 디렉토리에 하드링크를 생성(동일 드라이브). 실패 시 파일 복사로 대체."""
+    src = (ROOT_DIR / rel_image_path).resolve()
+    dst = _class_link_path(class_name, rel_image_path)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            return
+        try:
+            os.link(src, dst)
+        except Exception:
+            shutil.copy2(src, dst)
+    except Exception as e:
+        logger.warning(f"클래스 링크 생성 실패: class={class_name} rel={rel_image_path} err={e}")
+
+def _remove_class_link(class_name: str, rel_image_path: str) -> None:
+    """분류 디렉토리의 링크/복제 파일 제거 (상위 빈 폴더는 남겨둠)."""
+    dst = _class_link_path(class_name, rel_image_path)
+    try:
+        if dst.exists():
+            dst.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"클래스 링크 제거 실패: class={class_name} rel={rel_image_path} err={e}")
+
 # ----- labels file I/O -----
 def _labels_load():
     global LABELS, LABELS_MTIME
@@ -892,6 +921,10 @@ async def add_labels(req: LabelAddReq, _=Depends(labels_classes_sync_dep)):
         if not new_labels: raise HTTPException(status_code=400, detail="Empty labels")
         with LABELS_LOCK:
             cur = set(LABELS.get(rel, [])); cur.update(new_labels); LABELS[rel] = sorted(cur)
+        # 클래스 디렉토리에 하드링크/복제 생성
+        for label in new_labels:
+            if _CLASS_NAME_RE.match(label):
+                _ensure_class_link(label, rel)
         _labels_save(); _dircache_invalidate(_classification_dir())
         return {"success": True, "image": rel, "labels": LABELS[rel]}
     except Exception as e:
@@ -910,6 +943,14 @@ async def delete_labels(req: LabelDelReq, _=Depends(labels_classes_sync_dep)):
                 if not to_remove: raise HTTPException(status_code=400, detail="Empty labels to remove")
                 remain = [x for x in LABELS[rel] if x not in to_remove]
                 LABELS[rel] = remain or LABELS.pop(rel, None) or []
+        # 클래스 디렉토리에서 링크 제거
+        if req.labels is None:
+            for cls in _scan_classes():
+                _remove_class_link(cls, rel)
+        else:
+            for label in to_remove:
+                if _CLASS_NAME_RE.match(label):
+                    _remove_class_link(label, rel)
         _labels_save(); _dircache_invalidate(_classification_dir())
         return {"success": True, "image": rel, "labels": LABELS.get(rel, [])}
     except Exception as e:
@@ -928,6 +969,59 @@ async def get_labels(image_path: str, _=Depends(labels_classes_sync_dep)):
         return {"success": True, "image": rel, "labels": labels}
     except Exception as e:
         logger.exception(f"라벨 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---------------- Batch Classify (frontend expects /api/classify) ----------------
+class ClassifyReq(BaseModel):
+    images: List[str]
+    class_: str = Field(alias="class")
+    action: str = Field("add-all", description="add-all | replace | remove")
+
+@app.post("/api/classify")
+async def classify_images(req: ClassifyReq, _=Depends(labels_classes_sync_dep)):
+    try:
+        class_name = req.class_.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+
+        (_classification_dir() / class_name).mkdir(parents=True, exist_ok=True)
+
+        updated = 0
+        for any_path in req.images:
+            try:
+                rel = relkey_from_any_path(any_path)
+                abs_path = (ROOT_DIR / rel)
+                if not abs_path.exists() or not abs_path.is_file():
+                    continue
+                if not is_supported_image(abs_path):
+                    continue
+
+                with LABELS_LOCK:
+                    current = set(LABELS.get(rel, []))
+                    if req.action == "remove":
+                        if class_name in current:
+                            current.discard(class_name)
+                            _remove_class_link(class_name, rel)
+                    elif req.action == "replace":
+                        for existed in list(current):
+                            _remove_class_link(existed, rel)
+                        current = {class_name}
+                        _ensure_class_link(class_name, rel)
+                    else:
+                        if class_name not in current:
+                            current.add(class_name)
+                            _ensure_class_link(class_name, rel)
+                    LABELS[rel] = sorted(current)
+                updated += 1
+            except Exception:
+                continue
+
+        _labels_save(); _dircache_invalidate(_classification_dir())
+        return {"success": True, "updated": updated, "class": class_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"일괄 라벨링 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- Stats passthrough ----------------
