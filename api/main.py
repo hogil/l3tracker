@@ -486,49 +486,6 @@ def _remove_label_from_all_images(label_name: str) -> int:
         log_access_row(tag="INFO", note=f"라벨 완전 삭제: '{label_name}' → {removed}개 이미지에서 제거")
     return removed
 
-# ----- classification links (for Label Explorer) -----
-def _class_link_path(class_name: str, rel_image_path: str) -> Path:
-    """클래스 디렉토리 아래에 원본 상대경로 구조를 유지한 링크/복제 경로"""
-    return (_classification_dir() / class_name / rel_image_path).resolve()
-
-def _ensure_class_link(class_name: str, rel_image_path: str) -> None:
-    """분류 디렉토리에 항목 생성.
-    - Windows: 권한/볼륨 이슈가 잦아 안전하게 복제(shutil.copy2)
-    - POSIX: 하드링크 우선, 실패 시 복제
-    """
-    src = (ROOT_DIR / rel_image_path).resolve()
-    dst = _class_link_path(class_name, rel_image_path)
-    try:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            return
-        if os.name == "nt":
-            # Windows: 하드링크는 환경에 따라 권한/볼륨 제약 → 안전하게 복제 사용
-            shutil.copy2(src, dst)
-            logger.info(f"[CLASSIFY] copy → {dst}")
-        else:
-            try:
-                os.link(src, dst)
-                logger.info(f"[CLASSIFY] hardlink → {dst}")
-            except Exception as _e:
-                shutil.copy2(src, dst)
-                logger.info(f"[CLASSIFY] hardlink 실패({_e}), copy → {dst}")
-    except Exception as e:
-        logger.warning(f"클래스 항목 생성 실패: class={class_name} rel={rel_image_path} err={e}")
-
-def _remove_class_link(class_name: str, rel_image_path: str) -> None:
-    """분류 디렉토리의 링크/복제 파일 제거 (상위 빈 폴더는 남겨둠)."""
-    dst = _class_link_path(class_name, rel_image_path)
-    try:
-        if dst.exists():
-            try:
-                dst.unlink()
-            except FileNotFoundError:
-                pass
-            logger.info(f"[CLASSIFY] remove → {dst}")
-    except Exception as e:
-        logger.warning(f"클래스 항목 제거 실패: class={class_name} rel={rel_image_path} err={e}")
-
 # ----- labels file I/O -----
 def _labels_load():
     global LABELS, LABELS_MTIME
@@ -935,10 +892,6 @@ async def add_labels(req: LabelAddReq, _=Depends(labels_classes_sync_dep)):
         if not new_labels: raise HTTPException(status_code=400, detail="Empty labels")
         with LABELS_LOCK:
             cur = set(LABELS.get(rel, [])); cur.update(new_labels); LABELS[rel] = sorted(cur)
-        # 클래스 디렉토리에 하드링크/복제 생성
-        for label in new_labels:
-            if _CLASS_NAME_RE.match(label):
-                _ensure_class_link(label, rel)
         _labels_save(); _dircache_invalidate(_classification_dir())
         return {"success": True, "image": rel, "labels": LABELS[rel]}
     except Exception as e:
@@ -957,14 +910,6 @@ async def delete_labels(req: LabelDelReq, _=Depends(labels_classes_sync_dep)):
                 if not to_remove: raise HTTPException(status_code=400, detail="Empty labels to remove")
                 remain = [x for x in LABELS[rel] if x not in to_remove]
                 LABELS[rel] = remain or LABELS.pop(rel, None) or []
-        # 클래스 디렉토리에서 링크 제거
-        if req.labels is None:
-            for cls in _scan_classes():
-                _remove_class_link(cls, rel)
-        else:
-            for label in to_remove:
-                if _CLASS_NAME_RE.match(label):
-                    _remove_class_link(label, rel)
         _labels_save(); _dircache_invalidate(_classification_dir())
         return {"success": True, "image": rel, "labels": LABELS.get(rel, [])}
     except Exception as e:
@@ -985,59 +930,6 @@ async def get_labels(image_path: str, _=Depends(labels_classes_sync_dep)):
         logger.exception(f"라벨 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ---------------- Batch Classify (frontend expects /api/classify) ----------------
-class ClassifyReq(BaseModel):
-    images: List[str]
-    class_: str = Field(alias="class")
-    action: str = Field("add-all", description="add-all | replace | remove")
-
-@app.post("/api/classify")
-async def classify_images(req: ClassifyReq, _=Depends(labels_classes_sync_dep)):
-    try:
-        class_name = req.class_.strip()
-        if not class_name or not _CLASS_NAME_RE.match(class_name):
-            raise HTTPException(status_code=400, detail="Invalid class name")
-
-        (_classification_dir() / class_name).mkdir(parents=True, exist_ok=True)
-
-        updated = 0
-        for any_path in req.images:
-            try:
-                rel = relkey_from_any_path(any_path)
-                abs_path = (ROOT_DIR / rel)
-                if not abs_path.exists() or not abs_path.is_file():
-                    continue
-                if not is_supported_image(abs_path):
-                    continue
-
-                with LABELS_LOCK:
-                    current = set(LABELS.get(rel, []))
-                    if req.action == "remove":
-                        if class_name in current:
-                            current.discard(class_name)
-                            _remove_class_link(class_name, rel)
-                    elif req.action == "replace":
-                        for existed in list(current):
-                            _remove_class_link(existed, rel)
-                        current = {class_name}
-                        _ensure_class_link(class_name, rel)
-                    else:
-                        if class_name not in current:
-                            current.add(class_name)
-                            _ensure_class_link(class_name, rel)
-                    LABELS[rel] = sorted(current)
-                updated += 1
-            except Exception:
-                continue
-
-        _labels_save(); _dircache_invalidate(_classification_dir())
-        return {"success": True, "updated": updated, "class": class_name}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"일괄 라벨링 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # ---------------- Stats passthrough ----------------
 @app.get("/api/stats/daily")
 async def get_daily_stats(): return logger_instance.get_daily_stats()
@@ -1056,6 +948,251 @@ async def get_user_detail(user_id: str):
     return user_detail
 @app.get("/api/stats/active-users")
 async def get_active_users(): return logger_instance.get_active_users()
+
+# ---------------- Classification ----------------
+@app.post("/api/classify")
+async def classify_images(request: ClassifyRequest, _=Depends(labels_classes_sync_dep)):
+    """이미지를 클래스로 분류하고 classification 디렉토리에 복사/링크"""
+    try:
+        rel_path = relkey_from_any_path(request.image_path)
+        abs_path = ROOT_DIR / rel_path
+        if not abs_path.exists() or not abs_path.is_file():
+            raise HTTPException(status_code=404, detail="Image not found")
+        if not is_supported_image(abs_path):
+            raise HTTPException(status_code=400, detail="Unsupported image format")
+        
+        class_name = request.class_name.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+            
+        # 클래스 디렉토리 생성
+        class_dir = _classification_dir() / class_name
+        class_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 대상 파일 경로
+        target_file = class_dir / abs_path.name
+        
+        # 파일 복사 또는 하드링크 생성
+        try:
+            if abs_path.stat().st_dev == class_dir.stat().st_dev:
+                # 같은 드라이브면 하드링크 시도
+                if not target_file.exists():
+                    os.link(str(abs_path), str(target_file))
+                    log_access_row(tag="ACTION", note=f"하드링크 생성: {rel_path} -> {class_name}")
+            else:
+                # 다른 드라이브면 복사
+                if not target_file.exists():
+                    shutil.copy2(abs_path, target_file)
+                    log_access_row(tag="ACTION", note=f"파일 복사: {rel_path} -> {class_name}")
+        except (OSError, PermissionError) as e:
+            # 하드링크 실패시 복사로 폴백
+            if not target_file.exists():
+                shutil.copy2(abs_path, target_file)
+                log_access_row(tag="ACTION", note=f"복사 폴백: {rel_path} -> {class_name}")
+        
+        # 라벨도 추가
+        with LABELS_LOCK:
+            cur_labels = set(LABELS.get(rel_path, []))
+            cur_labels.add(class_name)
+            LABELS[rel_path] = sorted(cur_labels)
+        
+        _labels_save()
+        _dircache_invalidate(class_dir)
+        
+        return {"success": True, "image": rel_path, "class": class_name, "labels": LABELS[rel_path]}
+        
+    except Exception as e:
+        logger.exception(f"이미지 분류 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class BatchClassifyRequest(BaseModel):
+    images: List[str]
+    class_name: str
+
+@app.post("/api/classify/batch")
+async def classify_images_batch(request: BatchClassifyRequest, _=Depends(labels_classes_sync_dep)):
+    """배치 이미지 분류"""
+    try:
+        class_name = request.class_name.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+            
+        # 클래스 디렉토리 생성
+        class_dir = _classification_dir() / class_name
+        class_dir.mkdir(parents=True, exist_ok=True)
+        
+        results = []
+        errors = []
+        
+        for image_path in request.images:
+            try:
+                rel_path = relkey_from_any_path(image_path)
+                abs_path = ROOT_DIR / rel_path
+                
+                if not abs_path.exists() or not abs_path.is_file():
+                    errors.append(f"{rel_path}: 파일 없음")
+                    continue
+                    
+                if not is_supported_image(abs_path):
+                    errors.append(f"{rel_path}: 지원하지 않는 형식")
+                    continue
+                
+                # 대상 파일 경로
+                target_file = class_dir / abs_path.name
+                
+                # 파일 복사 또는 하드링크 생성
+                try:
+                    if abs_path.stat().st_dev == class_dir.stat().st_dev:
+                        # 같은 드라이브면 하드링크 시도
+                        if not target_file.exists():
+                            os.link(str(abs_path), str(target_file))
+                    else:
+                        # 다른 드라이브면 복사
+                        if not target_file.exists():
+                            shutil.copy2(abs_path, target_file)
+                except (OSError, PermissionError):
+                    # 하드링크 실패시 복사로 폴백
+                    if not target_file.exists():
+                        shutil.copy2(abs_path, target_file)
+                
+                # 라벨도 추가
+                with LABELS_LOCK:
+                    cur_labels = set(LABELS.get(rel_path, []))
+                    cur_labels.add(class_name)
+                    LABELS[rel_path] = sorted(cur_labels)
+                
+                results.append(rel_path)
+                
+            except Exception as e:
+                errors.append(f"{rel_path}: {str(e)}")
+        
+        if results:
+            _labels_save()
+            _dircache_invalidate(class_dir)
+        
+        log_access_row(tag="ACTION", note=f"배치 분류: {len(results)}개 성공, {len(errors)}개 실패 -> {class_name}")
+        
+        return {
+            "success": True,
+            "class": class_name,
+            "processed": len(results),
+            "errors": len(errors),
+            "results": results,
+            "error_details": errors
+        }
+        
+    except Exception as e:
+        logger.exception(f"배치 이미지 분류 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/classify")
+async def classify_images(request: ClassifyRequest, _=Depends(labels_classes_sync_dep)):
+    """이미지를 클래스로 분류하고 classification 디렉토리에 복사/링크"""
+    try:
+        rel_path = relkey_from_any_path(request.image_path)
+        abs_path = ROOT_DIR / rel_path
+        
+        if not abs_path.exists():
+            raise HTTPException(status_code=404, detail="Image file not found")
+        
+        class_name = request.class_name.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+        
+        # 클래스 디렉토리 생성
+        class_dir = _classification_dir() / class_name
+        class_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 대상 파일 경로
+        target_file = class_dir / abs_path.name
+        
+        # 파일이 이미 존재하면 스킵
+        if target_file.exists():
+            logger.info(f"파일이 이미 존재함: {target_file}")
+        else:
+            # 하드링크 시도, 실패하면 복사
+            try:
+                if abs_path.drive.lower() == target_file.drive.lower():
+                    os.link(str(abs_path), str(target_file))
+                    logger.info(f"하드링크 생성: {abs_path} -> {target_file}")
+                else:
+                    import shutil
+                    shutil.copy2(str(abs_path), str(target_file))
+                    logger.info(f"파일 복사: {abs_path} -> {target_file}")
+            except Exception as e:
+                import shutil
+                shutil.copy2(str(abs_path), str(target_file))
+                logger.info(f"하드링크 실패, 복사로 대체: {abs_path} -> {target_file}")
+        
+        # 라벨 추가
+        with LABELS_LOCK:
+            if rel_path not in LABELS:
+                LABELS[rel_path] = []
+            if class_name not in LABELS[rel_path]:
+                LABELS[rel_path].append(class_name)
+                _save_labels()
+        
+        return {"success": True, "message": f"Image classified as '{class_name}'"}
+        
+    except Exception as e:
+        logger.exception(f"이미지 분류 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/classify")
+async def delete_classification(request: ClassifyDeleteRequest, _=Depends(labels_classes_sync_dep)):
+    """classification 디렉토리에서 이미지 제거"""
+    try:
+        class_name = request.class_name.strip()
+        if not class_name or not _CLASS_NAME_RE.match(class_name):
+            raise HTTPException(status_code=400, detail="Invalid class name")
+            
+        class_dir = _classification_dir() / class_name
+        if not class_dir.exists():
+            raise HTTPException(status_code=404, detail="Class not found")
+        
+        # 이미지 경로 또는 이름으로 찾기
+        if request.image_path:
+            rel_path = relkey_from_any_path(request.image_path)
+            abs_path = ROOT_DIR / rel_path
+            target_file = class_dir / abs_path.name
+        elif request.image_name:
+            target_file = class_dir / request.image_name
+            # 원본 파일 경로 찾기
+            for root, dirs, files in os.walk(ROOT_DIR):
+                if request.image_name in files:
+                    abs_path = Path(root) / request.image_name
+                    rel_path = str(abs_path.relative_to(ROOT_DIR)).replace("\\", "/")
+                    break
+            else:
+                raise HTTPException(status_code=404, detail="Original image not found")
+        else:
+            raise HTTPException(status_code=400, detail="Either image_path or image_name required")
+        
+        if not target_file.exists():
+            raise HTTPException(status_code=404, detail="Classification file not found")
+        
+        # classification 디렉토리에서 파일 삭제
+        target_file.unlink()
+        
+        # 라벨에서도 제거
+        with LABELS_LOCK:
+            if rel_path in LABELS and class_name in LABELS[rel_path]:
+                new_labels = [x for x in LABELS[rel_path] if x != class_name]
+                if new_labels:
+                    LABELS[rel_path] = new_labels
+                else:
+                    LABELS.pop(rel_path, None)
+        
+        _labels_save()
+        _dircache_invalidate(class_dir)
+        
+        log_access_row(tag="ACTION", note=f"분류 제거: {rel_path} from {class_name}")
+        
+        return {"success": True, "removed": str(target_file.relative_to(ROOT_DIR)), "class": class_name}
+        
+    except Exception as e:
+        logger.exception(f"분류 제거 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- Static / Pages ----------------
 app.mount("/js", StaticFiles(directory="js"), name="js")

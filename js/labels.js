@@ -155,20 +155,33 @@ export class LabelManager {
         const action = labelAction ? labelAction.value : 'add-all';
         
         try {
-            // 라벨 추가 API 호출
-            const response = await fetch('/api/classify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    images: selectedImages,
-                    class: className,
-                    action: action
-                })
-            });
+            // 배치 이미지 분류 API 호출
+            let response;
+            if (selectedImages.length === 1) {
+                // 단일 이미지
+                response = await fetch('/api/classify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_path: selectedImages[0],
+                        class_name: className
+                    })
+                });
+            } else {
+                // 다중 이미지
+                response = await fetch('/api/classify/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        images: selectedImages,
+                        class_name: className
+                    })
+                });
+            }
             
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || '라벨 추가에 실패했습니다.');
+                throw new Error(errorData.detail || errorData.error || '라벨 추가에 실패했습니다.');
             }
             
             const result = await response.json();
@@ -380,14 +393,31 @@ export class LabelManager {
             // 이미지가 선택되어 있으면 즉시 분류 추가
             if (selected && selected.length > 0) {
                 try {
-                    const res = await fetch('/api/classify', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ images: selected, class: className, action: 'add-all' })
-                    });
+                    let res;
+                    if (selected.length === 1) {
+                        // 단일 이미지
+                        res = await fetch('/api/classify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                image_path: selected[0], 
+                                class_name: className 
+                            })
+                        });
+                    } else {
+                        // 다중 이미지
+                        res = await fetch('/api/classify/batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                images: selected, 
+                                class_name: className 
+                            })
+                        });
+                    }
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
-                        throw new Error(err.error || `분류 추가 실패 (${res.status})`);
+                        throw new Error(err.detail || err.error || `분류 추가 실패 (${res.status})`);
                     }
                     // UI 갱신
                     await this.refreshAll();
@@ -602,20 +632,27 @@ export class LabelManager {
                     del.className = 'label-explorer-del';
                     del.textContent = '삭제';
                     del.addEventListener('click', async () => {
+                        if (!confirm(`"${className}" 클래스에서 "${imagePath.split('/').pop()}" 이미지를 제거하시겠습니까?`)) {
+                            return;
+                        }
                         try {
-                            const res = await fetch('/api/labels', {
+                            // classification 디렉토리에서 파일 제거와 라벨 제거를 모두 수행
+                            const res = await fetch('/api/classify', {
                                 method: 'DELETE',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ image_path: imagePath, labels: [className] })
+                                body: JSON.stringify({ 
+                                    image_path: imagePath, 
+                                    class_name: className 
+                                })
                             });
                             if (!res.ok) {
                                 const err = await res.json().catch(() => ({}));
-                                throw new Error(err.error || `삭제 실패(${res.status})`);
+                                throw new Error(err.detail || err.error || `삭제 실패(${res.status})`);
                             }
                             await this.refreshAll();
                         } catch (err) {
-                            console.error('라벨 삭제 오류:', err);
-                            alert(`라벨 삭제 실패: ${err.message || err}`);
+                            console.error('분류 삭제 오류:', err);
+                            alert(`분류 삭제 실패: ${err.message || err}`);
                         }
                     });
                     row.appendChild(del);

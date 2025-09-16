@@ -3740,8 +3740,8 @@ class WaferMapViewer {
             // 선택된 라벨들 제거
             for (const labelGroup of this.selectedLabelsForRemoval) {
                 for (const fileName of labelGroup.fileNames) {
-                    await fetch('/api/classify/delete', {
-                        method: 'POST',
+                    await fetch('/api/classify', {
+                        method: 'DELETE',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             class_name: labelGroup.className, 
@@ -4017,8 +4017,8 @@ class WaferMapViewer {
                         for (const imagePath of selectedImages) {
                             const fileName = imagePath.split('/').pop();
                             if (files.some(file => file.name === fileName)) {
-                                await fetch('/api/classify/delete', {
-                                    method: 'POST',
+                                await fetch('/api/classify', {
+                                    method: 'DELETE',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ 
                                         class_name: cls, 
@@ -4225,8 +4225,8 @@ class WaferMapViewer {
                         const files = imgList.filter(f => f.type === 'file');
                         
                         for (const img of files) {
-                            await fetch('/api/classify/delete', {
-                                method: 'POST',
+                            await fetch('/api/classify', {
+                                method: 'DELETE',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ class_name: cls, image_name: img.name })
                             });
@@ -4242,8 +4242,8 @@ class WaferMapViewer {
                 if (!deleted && !confirm(`Delete ${labelSelection.selected.length} labels?`)) return;
                 for (const key of labelSelection.selected) {
                     const [delCls, delImg] = key.split('/');
-                    await fetch('/api/classify/delete', {
-                        method: 'POST',
+                    await fetch('/api/classify', {
+                        method: 'DELETE',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ class_name: delCls, image_name: delImg })
                     });
@@ -4511,8 +4511,8 @@ class WaferMapViewer {
                         }
                         for (const key of toDelete) {
                             const [delCls, delImg] = key.split('/');
-                            await fetch('/api/classify/delete', {
-                                method: 'POST',
+                            await fetch('/api/classify', {
+                                method: 'DELETE',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ class_name: delCls, image_name: delImg })
                             });
@@ -4638,8 +4638,8 @@ class WaferMapViewer {
                                 }
                                 for (const key of toDelete) {
                                     const [delCls, delImg] = key.split('/');
-                                    await fetch('/api/classify/delete', {
-                                        method: 'POST',
+                                    await fetch('/api/classify', {
+                                        method: 'DELETE',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ class_name: delCls, image_name: delImg })
                                     });
