@@ -670,6 +670,30 @@ async def get_files(path: Optional[str] = None):
         logger.exception(f"폴더 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ---------------- Helpers ----------------
+def _lookup_original_relpath_from_classification_path(path_str: str) -> Optional[str]:
+    """classification/<class>/<filename> 형식이 오면 ROOT_DIR 내 원본 상대경로를 추정한다."""
+    try:
+        p = Path(path_str).as_posix()
+        if "/classification/" not in p and not p.startswith("classification/"):
+            return None
+        filename = Path(p).name
+        # FILE_INDEX 키는 ROOT 기준 상대경로
+        with FILE_INDEX_LOCK:
+            for rel, _rec in FILE_INDEX.items():
+                if Path(rel).name == filename:
+                    return rel
+        # 인덱스가 아직 없으면 폴백: ROOT_DIR에서 탐색(최초 1회 비용)
+        for root, _dirs, files in os.walk(ROOT_DIR):
+            if filename in files:
+                abs_match = Path(root) / filename
+                try:
+                    return str(abs_match.relative_to(ROOT_DIR)).replace("\\", "/")
+                except Exception:
+                    return None
+    except Exception:
+        return None
+
 @app.get("/api/image")
 async def get_image(request: Request, path: str):
     try:
@@ -959,7 +983,8 @@ async def get_active_users(): return logger_instance.get_active_users()
 async def classify_images(request: ClassifyRequest, _=Depends(labels_classes_sync_dep)):
     """이미지를 클래스로 분류하고 classification 디렉토리에 복사/링크"""
     try:
-        rel_path = relkey_from_any_path(request.image_path)
+        # classification 경로가 들어오면 원본 상대경로로 역매핑 시도
+        rel_path = _lookup_original_relpath_from_classification_path(request.image_path) or relkey_from_any_path(request.image_path)
         abs_path = ROOT_DIR / rel_path
         if not abs_path.exists() or not abs_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
@@ -1031,7 +1056,7 @@ async def classify_images_batch(request: BatchClassifyRequest, _=Depends(labels_
         
         for image_path in request.images:
             try:
-                rel_path = relkey_from_any_path(image_path)
+                rel_path = _lookup_original_relpath_from_classification_path(image_path) or relkey_from_any_path(image_path)
                 abs_path = ROOT_DIR / rel_path
                 
                 if not abs_path.exists() or not abs_path.is_file():
@@ -1135,7 +1160,7 @@ async def classify_images(request: ClassifyRequest, _=Depends(labels_classes_syn
                 LABELS[rel_path] = []
             if class_name not in LABELS[rel_path]:
                 LABELS[rel_path].append(class_name)
-                _save_labels()
+                _labels_save()
         
         return {"success": True, "message": f"Image classified as '{class_name}'"}
         
@@ -1157,7 +1182,7 @@ async def delete_classification(request: ClassifyDeleteRequest, _=Depends(labels
         
         # 이미지 경로 또는 이름으로 찾기
         if request.image_path:
-            rel_path = relkey_from_any_path(request.image_path)
+            rel_path = _lookup_original_relpath_from_classification_path(request.image_path) or relkey_from_any_path(request.image_path)
             abs_path = ROOT_DIR / rel_path
             target_file = class_dir / abs_path.name
         elif request.image_name:
