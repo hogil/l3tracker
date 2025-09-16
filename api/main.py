@@ -492,28 +492,42 @@ def _class_link_path(class_name: str, rel_image_path: str) -> Path:
     return (_classification_dir() / class_name / rel_image_path).resolve()
 
 def _ensure_class_link(class_name: str, rel_image_path: str) -> None:
-    """분류 디렉토리에 하드링크를 생성(동일 드라이브). 실패 시 파일 복사로 대체."""
+    """분류 디렉토리에 항목 생성.
+    - Windows: 권한/볼륨 이슈가 잦아 안전하게 복제(shutil.copy2)
+    - POSIX: 하드링크 우선, 실패 시 복제
+    """
     src = (ROOT_DIR / rel_image_path).resolve()
     dst = _class_link_path(class_name, rel_image_path)
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
             return
-        try:
-            os.link(src, dst)
-        except Exception:
+        if os.name == "nt":
+            # Windows: 하드링크는 환경에 따라 권한/볼륨 제약 → 안전하게 복제 사용
             shutil.copy2(src, dst)
+            logger.info(f"[CLASSIFY] copy → {dst}")
+        else:
+            try:
+                os.link(src, dst)
+                logger.info(f"[CLASSIFY] hardlink → {dst}")
+            except Exception as _e:
+                shutil.copy2(src, dst)
+                logger.info(f"[CLASSIFY] hardlink 실패({_e}), copy → {dst}")
     except Exception as e:
-        logger.warning(f"클래스 링크 생성 실패: class={class_name} rel={rel_image_path} err={e}")
+        logger.warning(f"클래스 항목 생성 실패: class={class_name} rel={rel_image_path} err={e}")
 
 def _remove_class_link(class_name: str, rel_image_path: str) -> None:
     """분류 디렉토리의 링크/복제 파일 제거 (상위 빈 폴더는 남겨둠)."""
     dst = _class_link_path(class_name, rel_image_path)
     try:
         if dst.exists():
-            dst.unlink(missing_ok=True)
+            try:
+                dst.unlink()
+            except FileNotFoundError:
+                pass
+            logger.info(f"[CLASSIFY] remove → {dst}")
     except Exception as e:
-        logger.warning(f"클래스 링크 제거 실패: class={class_name} rel={rel_image_path} err={e}")
+        logger.warning(f"클래스 항목 제거 실패: class={class_name} rel={rel_image_path} err={e}")
 
 # ----- labels file I/O -----
 def _labels_load():
