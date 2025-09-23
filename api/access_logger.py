@@ -354,6 +354,7 @@ class AccessLogger:
                 "first_seen": today,
                 "last_seen": today,
                 "last_access_time": now_timestamp,
+                "first_access_time": now_timestamp,
                 "session_count": 0,  # 총 세션 수
                 "total_session_time": 0,  # 총 세션 시간 (초)
                 "current_session_start": now_timestamp,  # 현재 세션 시작 시간
@@ -370,6 +371,10 @@ class AccessLogger:
             for k, v in profile_meta.items():
                 if v:
                     user_data["profile"][k] = v
+        # 기존 사용자에 최초 접속 시간이 없다면 보정
+        if "first_access_time" not in user_data:
+            user_data["first_access_time"] = now_timestamp
+
         user_data["total_requests"] += 1
         user_data["last_seen"] = today
         user_data["last_access_time"] = now_timestamp

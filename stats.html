@@ -672,14 +672,14 @@
                 const displayName = user.display_name || "Anonymous";
                 
                 html += `
-                    <div class="clickable" onclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
+                    <div class="clickable" ondblclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
                         <div style="overflow: hidden;">
                             <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
                             <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
                         </div>
                         <div style="text-align: center; color: #FF9800; font-weight: bold;">${user.total_requests}</div>
                         <div style="text-align: center; color: #2196F3;">${user.unique_days}일</div>
-                        <div style="text-align: center; font-size: 0.8em; color: #ccc;">${formatDate(user.last_seen)}</div>
+                        <div style="text-align: center; font-size: 0.8em; color: #ccc;">${formatDateTime(user.last_access_time)}</div>
                     </div>
                 `;
             });
@@ -707,37 +707,10 @@
                 const displayName = user.display_name || user.user_id;
                 
                 // last_access가 날짜만 있는 경우와 타임스탬프가 있는 경우 구분
-                let lastAccess;
-                if (user.last_access.includes(' ')) {
-                    // 타임스탬프가 있는 경우: "2025-09-11 14:30:45"
-                    lastAccess = new Date(user.last_access).toLocaleString('ko-KR', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                } else {
-                    // 날짜만 있는 경우: "2025-09-11" -> 해당 날짜의 현실적인 시간 표시
-                    const baseDate = new Date(user.last_access);
-                    // 사용자별로 다른 시간을 보여주기 위해 user_id의 해시값 사용
-                    const userHash = user.user_id.split('').reduce((hash, char) => 
-                        ((hash << 5) - hash) + char.charCodeAt(0), 0);
-                    
-                    // 하루 중 오전 9시~오후 6시 범위에서 시간 분산 (9*60 + 9*60 = 540분)
-                    const minuteOffset = Math.abs(userHash) % 540; // 0~540분 (9시간)
-                    baseDate.setHours(9, 0, 0, 0); // 오전 9시부터 시작
-                    baseDate.setMinutes(baseDate.getMinutes() + minuteOffset);
-                    
-                    lastAccess = baseDate.toLocaleString('ko-KR', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
-                }
+                const lastAccess = formatDateTime(user.last_access);
                 
                 html += `
-                    <div class="clickable" onclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
+                    <div class="clickable" ondblclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
                         <div style="overflow: hidden;">
                             <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
                             <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
@@ -763,7 +736,7 @@
                     <div class="detail-grid">
                         <div class="detail-card">
                             <div class="detail-title">사용자 ID</div>
-                            <div class="detail-value" style="font-family: monospace;">${userId}</div>
+                            <div class="detail-value" style="font-family: monospace;">${userId.includes('@') ? userId.split('@')[0] : userId}</div>
                         </div>
                         <div class="detail-card">
                             <div class="detail-title">총 요청 수</div>
@@ -775,12 +748,21 @@
                         </div>
                         <div class="detail-card">
                             <div class="detail-title">첫 접속</div>
-                            <div class="detail-value">${formatDate(userData.first_seen)}</div>
+                            <div class="detail-value">${formatDateTime(userData.first_access_time || userData.first_seen)}</div>
                         </div>
                         <div class="detail-card">
                             <div class="detail-title">최근 접속</div>
-                            <div class="detail-value">${formatDate(userData.last_seen)}</div>
+                            <div class="detail-value">${formatDateTime(userData.last_access_time || userData.last_seen)}</div>
                         </div>
+                        ${userData.profile && (userData.profile.Username || userData.profile.DeptName) ? `
+                        <div class="detail-card">
+                            <div class="detail-title">이름</div>
+                            <div class="detail-value">${userData.profile.Username || '-'}</div>
+                        </div>
+                        <div class="detail-card">
+                            <div class="detail-title">부서</div>
+                            <div class="detail-value">${userData.profile.DeptName || userData.profile.department || '-'}</div>
+                        </div>` : ''}
                         <div class="detail-card">
                             <div class="detail-title">사용 IP</div>
                             <div class="detail-value" style="font-family: monospace; font-size: 1rem;">${userData.ip_addresses.join(', ')}</div>
@@ -857,6 +839,20 @@
                     weekday: 'short'
                 });
             }
+        }
+
+        function formatDateTime(dt) {
+            if (!dt) return '-';
+            const d = new Date(dt);
+            if (isNaN(d.getTime())) return dt; // 이미 포맷된 문자열
+            return d.toLocaleString('ko-KR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
         }
         
         function formatChartDate(dateStr) {
