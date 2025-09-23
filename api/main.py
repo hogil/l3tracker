@@ -328,6 +328,8 @@ app = FastAPI(title="L3Tracker API", version="2.6.0")
 # ======================== SAML SSO (OneLogin python3-saml) ========================
 SAML_DIR = Path("saml")
 DEV_SAML = os.getenv("DEV_SAML", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
+AUTO_LOGIN = os.getenv("AUTO_LOGIN", "0").strip().lower() in {"1", "true", "yes", "y", "on"}
+DEFAULT_ORG_URL = os.getenv("DEFAULT_ORG_URL", "")
 
 def _load_saml_files() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     base: Dict[str, Any] = {}
@@ -686,6 +688,16 @@ async def no_store_for_labels_and_classes(request: Request, call_next):
 # ---- 액세스 테이블 로그 ----
 class AccessTrackingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # 자동 로그인 강제: 세션 쿠키가 없고 HTML 페이지 접근 시 SAML 로그인으로 리다이렉트
+        if AUTO_LOGIN:
+            path = request.url.path
+            # 정적/JS/API 는 제외하고, 루트/페이지 접근만 리다이렉트
+            if not path.startswith(('/api/', '/js/', '/static/', '/saml/')):
+                if not request.cookies.get('session_user'):
+                    login_url = '/saml/login'
+                    if DEFAULT_ORG_URL:
+                        login_url += f"?org_url={DEFAULT_ORG_URL}"
+                    return RedirectResponse(login_url, status_code=302)
         response = await call_next(request)
 
         client_ip = logger_instance.get_client_ip(request)

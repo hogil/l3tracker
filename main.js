@@ -3408,6 +3408,21 @@ class WaferMapViewer {
         // 파일명 패널 높이를 고려하여 적절히 위치 조정 (위로 이동) - 초기 로드와 동일
         this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
         
+        // 리셋 버튼 시에도 렌더러에 현재 배율을 즉시 전달하여 픽셀 감소 로직이 동작하도록 함
+        if (this.semiconductorRenderer) {
+            try {
+                this.semiconductorRenderer.setScale(this.transform.scale);
+                if (typeof this.semiconductorRenderer.getInfo === 'function') {
+                    const info = this.semiconductorRenderer.getInfo();
+                    console.debug('[ResetViewWithAbsoluteOffset] scale=', this.transform.scale.toFixed(3), info);
+                } else {
+                    console.debug('[ResetViewWithAbsoluteOffset] scale=', this.transform.scale.toFixed(3));
+                }
+            } catch (e) {
+                console.warn('SemiconductorRenderer.setScale 실패:', e);
+            }
+        }
+        
         this.updateZoomDisplay();
         this.scheduleDraw();
     }

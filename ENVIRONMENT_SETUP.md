@@ -89,6 +89,26 @@ source ~/.bashrc
 [Environment]::SetEnvironmentVariable("SSL_KEYFILE", "cert/server.key", "User")
 ```
 
+## SAML / 자동 로그인 관련 환경변수
+
+#### Ubuntu 24
+```bash
+# 개발 모드 SAML 허용(없으면 0)
+echo 'export DEV_SAML=1' >> ~/.bashrc
+# 자동 로그인 강제 (세션 없으면 /saml/login으로 리다이렉트)
+echo 'export AUTO_LOGIN=1' >> ~/.bashrc
+# 사내 org_url 기본값(필요 시)
+echo 'export DEFAULT_ORG_URL="stsds.secsso.net"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### Windows 11
+```powershell
+[Environment]::SetEnvironmentVariable("DEV_SAML","1","User")
+[Environment]::SetEnvironmentVariable("AUTO_LOGIN","1","User")
+[Environment]::SetEnvironmentVariable("DEFAULT_ORG_URL","stsds.secsso.net","User")
+```
+
 ## 선택적 환경변수
 
 ### 5. 썸네일 설정
@@ -143,12 +163,13 @@ echo 'export RELOAD="0"' >> ~/.bashrc  # 개발 시 1로 설정
 Get-ChildItem Env: | Where-Object Name -like "*UVICORN*"
 Get-ChildItem Env: | Where-Object Name -like "*PROJECT*"
 Get-ChildItem Env: | Where-Object Name -like "*SSL*"
+Get-ChildItem Env: | Where-Object Name -like "*SAML*"
 ```
 
 ### Ubuntu 24
 ```bash
 # 모든 환경변수 확인
-env | grep -E "(UVICORN|PROJECT|SSL|HOST|PORT)"
+env | grep -E "(UVICORN|PROJECT|SSL|HOST|PORT|SAML|AUTO_LOGIN|DEFAULT_ORG_URL)"
 ```
 
 ## 권장 설정값
