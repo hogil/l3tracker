@@ -4,6 +4,28 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.0.0/)를 따르며,
 버전 관리는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
+## [2.1.0] - 2025-09-23
+
+### ✨ 추가/변경
+- 프론트
+  - 초기 로드시 배율별 픽셀 축소 즉시 적용(0.2/0.5 단계 캔버스 동기 생성 → 고품질 ImageBitmap 비동기 교체)
+  - 줌 휠 50ms 스로틀로 프레임 드랍 방지
+  - Label Explorer 개선: 단일 선택 첫 진입 시 그리드 잔존 오버레이 제거, 캔버스 z-index 상향.
+  - 그리드 → 클래스 이동 후에도 직전 선택으로 라벨 추가 가능(선택 지속 저장).
+- 백엔드
+  - FastAPI + Uvicorn 고정화, `/api/image`, `/api/thumbnail` 캐시 최적화(ETag/Cache-Control)
+  - SAML 최소 구현(`/saml/metadata`, `/saml/login`, `/saml/acs`, `/saml/dev-login`) 및 계정 기반 로깅/통계
+  - 워커 자동 기본값: 환경변수 미설정 시 CPU 논리 코어의 50%(최소 2, 최대 32)
+
+### 🐛 수정
+- 초기 접속 직후 라벨 단일 선택 시 화면 미표시 문제
+- 라벨 추가 모달이 그리드 해제 후 선택을 잃는 문제
+
+### 📚 문서
+- ARCHITECTURE.md: FastAPI/SAML/로깅/워커 정책 업데이트
+
+---
+
 ## [2.0.0] - 2025-01-10
 
 ### 🎉 주요 변경사항

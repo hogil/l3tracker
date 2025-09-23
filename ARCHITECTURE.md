@@ -28,11 +28,11 @@ L3 Tracker는 반도체 웨이퍼맵 불량 분석을 위한 웹 기반 시스�
 - **Style**: CSS3 with CSS Variables
 
 ### Backend
-- **Framework**: Flask 2.0+
-- **Image Processing**: OpenCV, Pillow
-- **AI/ML**: TensorFlow 2.x, Keras
-- **Async**: asyncio, threading
-- **Database**: File-based (JSON)
+- **Framework**: FastAPI + Uvicorn
+- **Image Processing**: Pillow (썸네일), 내부 파일 인덱싱
+- **Auth/SSO**: OneLogin python3-saml (SAML SP 최소구현)
+- **Async**: asyncio, background tasks
+- **Storage**: 파일 시스템 (JSON 통계/로그)
 
 ### DevOps
 - **Version Control**: Git
@@ -132,18 +132,23 @@ class SemiconductorRenderer {
 
 ### 2. Backend Components
 
-#### Flask Application
-**위치**: `/api/app.py`
+#### FastAPI Application
+**위치**: `/api/main.py`
 
-RESTful API 서버로 모든 백엔드 요청을 처리합니다.
-
-**엔드포인트**:
+주요 엔드포인트:
 ```python
-@app.route('/api/files')       # 파일 시스템 탐색
-@app.route('/api/image')       # 이미지 데이터 제공
-@app.route('/api/thumbnail')   # 썸네일 생성/제공
-@app.route('/api/classify')    # AI 분류 실행
-@app.route('/api/labels')      # 라벨 관리
+GET /api/files            # 폴더 탐색
+GET /api/image            # 원본 이미지 제공 (ETag/Cache-Control)
+GET /api/thumbnail        # 썸네일(고품질) 제공
+POST /api/classify        # 이미지에 클래스(라벨) 부여
+DELETE /api/classify      # 라벨 제거
+GET /api/classes          # 클래스 목록
+GET /saml/metadata        # SP 메타데이터
+GET /saml/login           # IdP 리다이렉트 시작
+POST /saml/acs            # Assertion Consumer Service
+GET /saml/dev-login       # 개발용 계정 주입
+GET /api/whoami           # 세션 확인 (session_user, session_meta)
+GET /api/sso/ping         # 외부 SSO 헬스 체크
 ```
 
 #### AI Classification Engine
@@ -304,16 +309,10 @@ CRITICAL: 심각한 오류
 - 메모리 사용량
 - CPU 사용률
 
-### 3. 헬스 체크
-```python
-@app.route('/health')
-def health_check():
-    return {
-        'status': 'healthy',
-        'timestamp': datetime.now(),
-        'version': '2.0.0'
-    }
-```
+### 3. 헬스/워커
+- 실행: `python -m api.main` (HTTPS 전용)
+- 워커: `UVICORN_WORKERS` 미설정 시 논리코어 50%를 기본값(최소2, 최대32). reload=1이면 워커=1 고정.
+- 예) Windows: `setx UVICORN_WORKERS 16`, Ubuntu: `export UVICORN_WORKERS=16`
 
 ## 개발 가이드라인
 

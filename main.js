@@ -19,7 +19,7 @@ const ZOOM_FACTOR = 1.2;
 const THUMB_BATCH_SIZE = 20;
 const DEBOUNCE_DELAY = 0;
 // 초기 맞춤 여유 (상대 비율)
-const FIT_RELATIVE_MARGIN = 0.96; // 초기 로드 시 4% 여유 (2% 더 작게)
+const FIT_RELATIVE_MARGIN = 0.95; // 초기 로드 시 5% 여유 (미세하게 더 작게)
 // 리셋 시 절대 퍼센트포인트 오프셋 (예: -0.02 => 2%p 더 작게)
 const RESET_ABSOLUTE_PERCENT_OFFSET = -0.02;
 
@@ -460,26 +460,22 @@ class WaferMapViewer {
         console.log('Wafer Map Explorer: 오른쪽 클릭으로 모든 선택 해제 및 초기 상태 복귀');
     }
 
-    // 단일 이미지 모드 숨기기
+        // 단일 이미지 모드 숨기기
     hideImage() {
-        // 캔버스 숨기기
-        if (this.dom.imageCanvas) {
-            this.dom.imageCanvas.style.display = 'none';
-        }
-        if (this.dom.overlayCanvas) {
-            this.dom.overlayCanvas.style.display = 'none';
-        }
-        if (this.dom.minimapContainer) {
-            this.dom.minimapContainer.style.display = 'none';
-        }
-        
-        // 파일명 표시 숨기기
-        this.hideFileName();
+        // 단일 이미지 모드만 해제 (상단 패널/줌바는 유지)
+        if (this.dom.imageCanvas) this.dom.imageCanvas.style.display = 'none';
+        if (this.dom.overlayCanvas) this.dom.overlayCanvas.style.display = 'none';
+        if (this.dom.minimapContainer) this.dom.minimapContainer.style.display = 'none';
         
         // 뷰어 컨테이너 클래스 제거
         if (this.dom.viewerContainer) {
             this.dom.viewerContainer.classList.remove('single-image-mode');
         }
+        
+        // 상단 패널과 줌바는 항상 표시
+        const viewControls = document.querySelector('.view-controls');
+        if (viewControls) viewControls.style.display = 'flex';
+        if (this.dom.fileNameDisplay) this.dom.fileNameDisplay.style.display = 'block';
     }
 
     // 파일명 표시
@@ -882,14 +878,17 @@ class WaferMapViewer {
                 this.gridSelectedIdxs = [];
                 this.selectedImagePath = '';
                 
-                // 그리드 모드와 단일 이미지 모드 숨기기
+                // 현재 표시 비우기
                 this.hideGrid();
                 this.hideImage();
+                this.hideFileName();
                 
                 await this.updateCurrentPath();
                 this.loadDirectoryContents(null, this.dom.fileExplorer);
                 await this.refreshClassList();
                 await this.refreshLabelExplorer();
+                // 초기 상태로 전환(검색창/그리드 컨트롤 표시)
+                this.showInitialState();
                 // 폴더 변경 메시지 제거
             } else {
                 this.showToast('폴더 변경에 실패했습니다.');
@@ -3139,6 +3138,10 @@ class WaferMapViewer {
                 // 초기 zoom 설정
                 this.semiconductorRenderer.setScale(this.transform.scale);
                 this.resetView(false);
+                // resetView가 scale을 재계산하므로 렌더러 스케일을 다시 동기화
+                if (this.semiconductorRenderer) {
+                    this.semiconductorRenderer.setScale(this.transform.scale);
+                }
                 this.scheduleDraw();
             } else {
                 console.log(`🔍 [DEBUG] SemiconductorRenderer 없음 - 기존 방식 사용`);
@@ -3163,10 +3166,16 @@ class WaferMapViewer {
             setTimeout(() => {
                 // 이미지가 표시된 후 컨테이너 rect가 변하는 경우 재계산
                 this.resetView(true);
+                if (this.semiconductorRenderer) {
+                    this.semiconductorRenderer.setScale(this.transform.scale);
+                }
             }, 0);
             // 일부 레이아웃에서 늦게 적용되는 패딩/스크롤바 보정용 재맞춤 한 번 더
             setTimeout(() => {
                 this.resetView(true);
+                if (this.semiconductorRenderer) {
+                    this.semiconductorRenderer.setScale(this.transform.scale);
+                }
             }, 50);
         } catch (err) {
             console.error(`Failed to load image: ${path}`, err);
@@ -3198,6 +3207,7 @@ class WaferMapViewer {
         this.dom.imageCanvas.style.top = '0';
         this.dom.imageCanvas.style.right = '0';
         this.dom.imageCanvas.style.bottom = '0';
+        // 캔버스 z-index 기본값 유지 (상단 패널/줌바를 가리지 않도록 낮게 유지)
         this.dom.imageCanvas.style.zIndex = 1;
         this.dom.viewerContainer.style.position = 'relative';
         // Set canvas background to black
@@ -3420,7 +3430,7 @@ class WaferMapViewer {
         const vpY = padY + viewY * scale;
         let vpW = viewW / viewScale * scale;
         let vpH = viewH / viewScale * scale;
-        // 뷰포트 10% 축소로 시각적 여유 확보
+        // 뷰포트 10% → 90% 크기(= 10% 축소) 유지 요청 반영
         const shrink = 0.9;
         const newVpW = vpW * shrink;
         const newVpH = vpH * shrink;
@@ -3975,6 +3985,10 @@ class WaferMapViewer {
         if (this.gridMode && this.gridSelectedIdxs && this.gridSelectedIdxs.length > 0) {
             return this.gridSelectedIdxs.map(idx => this.selectedImages[idx]).filter(Boolean);
         }
+        // 그리드 모드가 해제되었더라도 이전 선택을 유지해 라벨 추가가 가능하도록 지원
+        if (this.persistentSelectedImages && this.persistentSelectedImages.length > 0) {
+            return [...this.persistentSelectedImages];
+        }
         // 단일 이미지 모드에서는 현재 선택된 이미지 반환
         if (this.selectedImagePath) {
             return [this.selectedImagePath];
@@ -4453,8 +4467,9 @@ class WaferMapViewer {
             labelSelection.selected = [];
             labelSelection.selectedClasses = [];
             this.updateLabelExplorerSelection();
-            // Wafer Map Explorer 선택은 유지하도록 clearWaferMapExplorerSelection() 호출 제거
-            console.log('Label Explorer: 우클릭으로 Label Explorer만 선택 해제 (Wafer Map Explorer 선택 유지)');
+            // 단일 이미지가 표시 중이면 숨겨 Wafer Map Explorer와 일관 동작
+            this.hideImage();
+            console.log('Label Explorer: 우클릭 → 선택 해제 및 이미지 숨김');
         };
         
         // --- 키보드 단축키 (Label Explorer 전용) ---
@@ -4481,8 +4496,8 @@ class WaferMapViewer {
                     labelSelection.selected = [];
                     labelSelection.selectedClasses = [];
                     this.updateLabelExplorerSelection();
-                    // Wafer Map Explorer 선택은 유지하도록 clearWaferMapExplorerSelection() 호출 제거
-                    console.log('Label Explorer 프레임: 우클릭으로 Label Explorer만 선택 해제 (Wafer Map Explorer 선택 유지)');
+                    this.hideImage();
+                    console.log('Label Explorer 프레임: 우클릭 → 선택 해제 및 이미지 숨김');
                 }
             };
         }
@@ -4766,9 +4781,8 @@ class WaferMapViewer {
                                 console.log(`Label Explorer: 단일 이미지 모드 - ${selectedKey}`);
                                 
                                 // grid mode 해제하고 single image mode로 전환
-                                if (this.gridMode) {
-                                    this.hideGrid();
-                                }
+                        // 첫 진입 시에도 그리드 잔존 오버레이가 캔버스를 가리지 않도록 항상 정리
+                        this.hideGrid();
                                 
                                 this.loadImage(`classification/${selectedKey}`);
                             } else {
@@ -4893,9 +4907,8 @@ class WaferMapViewer {
                                         console.log(`Label Explorer (동적): 단일 이미지 모드 - ${selectedKey}`);
                                         
                                         // grid mode 해제하고 single image mode로 전환
-                                        if (this.gridMode) {
-                                            this.hideGrid();
-                                        }
+                                        // 첫 진입 시에도 그리드 잔존 오버레이가 캔버스를 가리지 않도록 항상 정리
+                                        this.hideGrid();
                                         
                                         this.loadImage(`classification/${selectedKey}`);
                                     } else {
@@ -5272,8 +5285,7 @@ class WaferMapViewer {
             document.documentElement.style.setProperty('--grid-cols', this.gridCols);
         }
         
-        // 파일명 표시 숨기기 (그리드 모드에서는 파일명을 표시하지 않음)
-        this.hideFileName();
+        // 파일명 패널은 유지 (제품 변경 시 상단 패널 사라짐 방지)
         
         const viewControls = document.querySelector('.view-controls');
         if (viewControls) viewControls.style.display = 'none';
@@ -5500,6 +5512,9 @@ class WaferMapViewer {
         this.dom.imageCanvas.style.display = 'block';
         this.dom.overlayCanvas.style.display = 'block';
         this.dom.minimapContainer.style.display = 'block';
+        // 캔버스가 항상 상단에 오도록 보장 (그리드 DOM보다 높은 z-index)
+        this.dom.imageCanvas.style.zIndex = 100;
+        this.dom.overlayCanvas.style.zIndex = 2;
         
         // 컨트롤 전환
         const gridControls = document.getElementById('grid-controls');
@@ -5514,6 +5529,13 @@ class WaferMapViewer {
         if (this.gridResizeObserver) {
             this.gridResizeObserver.disconnect();
             this.gridResizeObserver = null;
+        }
+        
+        // 이전 그리드 선택 유지: 라벨 추가 모달에서 사용할 수 있도록 저장
+        if (Array.isArray(this.selectedImages) && Array.isArray(this.gridSelectedIdxs)) {
+            this.persistentSelectedImages = this.gridSelectedIdxs.map(i => this.selectedImages[i]).filter(Boolean);
+        } else {
+            this.persistentSelectedImages = [];
         }
         
         this.scheduleDraw();

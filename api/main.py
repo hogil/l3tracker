@@ -1772,6 +1772,7 @@ async def shutdown_event():
 # ======================== __main__ ========================
 if __name__ == "__main__":
     import uvicorn
+    import multiprocessing
 
     if not config.SSL_ENABLED:
         logger.error("[SSL] SSL_ENABLED=0 입니다. 이 실행파일은 HTTPS만 지원합니다.")
@@ -1788,12 +1789,28 @@ if __name__ == "__main__":
     logger.info(f"[SSL] CERTFILE={cert_path}")
     logger.info(f"[SSL] KEYFILE={key_path}")
 
+    # 워커 수 결정 로직
+    # - 환경변수 UVICORN_WORKERS가 있으면 그대로 사용
+    # - 없으면 CPU 논리 코어의 50%를 기본값으로 사용 (최소 2, 최대 32)
+    env_val = os.getenv("UVICORN_WORKERS")
+    if env_val is not None and env_val.strip() != "":
+        try:
+            workers_env = int(env_val)
+        except Exception:
+            workers_env = 1
+    else:
+        try:
+            cpu_cnt = max(1, multiprocessing.cpu_count())
+            workers_env = max(2, min(32, int(cpu_cnt * 0.5)))
+        except Exception:
+            workers_env = 2
+    # reload 사용 시 workers=1 고정. reload 비사용 시 환경변수로 워커 수 제어
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",
         port=int(config.HTTPS_PORT),        # 기본 8443
         reload=reload_flag,                 # 개발 편의
-        workers=1,                          # reload 사용 시 1 고정
+        workers=(1 if reload_flag else max(1, workers_env)),
         log_level="info",
         access_log=False,                   # 커스텀 테이블 로그 사용
         use_colors=True,

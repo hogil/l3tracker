@@ -54,6 +54,8 @@ class SemiconductorRenderer {
         this.generatingLevels = new Set(); // 진행 중인 레벨 키
         this.imageVersion = 0;            // 현재 이미지 버전
         this.pyramidVersion = 0;          // 피라미드 버전 (검증용)
+        this._lastLevelKey = '1';         // 마지막으로 적용된 레벨 키
+        this._lastEnsureAt = 0;           // 직전 보장 시각(ms)
         
         this.setupPixelPerfectCanvas();
     }
@@ -242,6 +244,12 @@ class SemiconductorRenderer {
      */
     setScale(newScale) {
         this.scale = Math.max(this.options.minVisibleScale, Math.min(10, newScale));
+        // 줌 임계 변경 시, 필요한 레벨을 즉시(동기) 확보하여 첫 프레임부터 픽셀 축소 적용
+        try {
+            this._ensureImmediateLevelForScale();
+        } catch (e) {
+            // 동기 보장은 실패해도 무시하고 비동기 백필에 맡김
+        }
         this.render();
         return this.scale;
     }
@@ -278,18 +286,60 @@ class SemiconductorRenderer {
                     this.generateImagePyramid(this.currentImage, this.imageVersion).catch(() => {});
                 } else {
                     selected = this.imagePyramid['0.2'];
+                    this._lastLevelKey = '0.2';
                 }
             } else if (needHalf) {
                 if (!this.imagePyramid['0.5']) {
                     this.generateImagePyramid(this.currentImage, this.imageVersion).catch(() => {});
                 } else {
                     selected = this.imagePyramid['0.5'];
+                    this._lastLevelKey = '0.5';
                 }
             } else {
                 // 원본 유지
+                this._lastLevelKey = '1';
             }
         }
         return selected;
+    }
+
+    /**
+     * 현재 scale에 필요한 레벨을 즉시 확보(동기)하여 첫 렌더부터 픽셀 축소가 반영되도록 한다.
+     * - 캔버스 객체를 즉시 생성해 imagePyramid에 채워 넣고, 이후 고품질 ImageBitmap으로 비동기 대체
+     */
+    _ensureImmediateLevelForScale() {
+        if (!this.currentImage || !this.options.usePyramid) return;
+        const now = Date.now();
+        // 50ms 이내 재호출 방지 (휠 잦은 이벤트 스로틀)
+        if (now - this._lastEnsureAt < 50) return;
+        this._lastEnsureAt = now;
+
+        const needFifth = this.scale <= 0.25;
+        const needHalf = !needFifth && this.scale <= 0.75;
+        const key = needFifth ? '0.2' : (needHalf ? '0.5' : '1');
+        if (key === '1') return; // 원본이면 즉시 보장 불필요
+        if (this.imagePyramid[key]) return; // 이미 준비됨
+
+        // 즉시(동기) 캔버스 생성으로 첫 프레임 화질 반영
+        const scale = key === '0.2' ? 0.2 : 0.5;
+        const w = Math.max(1, Math.floor(this.currentImage.width * scale));
+        const h = Math.max(1, Math.floor(this.currentImage.height * scale));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const cx = c.getContext('2d', { alpha: false, desynchronized: true });
+        cx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in cx) cx.imageSmoothingQuality = 'high';
+        cx.drawImage(this.currentImage, 0, 0, w, h);
+        this.imagePyramid[key] = c; // 캔버스도 drawImage 대상 가능
+
+        // 고품질 ImageBitmap으로 비동기 교체
+        this.createResizedBitmap(this.currentImage, scale).then(bmp => {
+            // 최신 이미지인지 확인
+            if (this.imageVersion === this.pyramidVersion || this.pyramidVersion === 0) {
+                this.imagePyramid[key] = bmp;
+                this.pyramidVersion = this.imageVersion;
+            }
+        }).catch(() => {});
     }
     
     /**
