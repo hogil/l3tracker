@@ -710,7 +710,17 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 meta_dict = json.loads(meta_cookie)
             except Exception:
                 meta_dict = None
+        # 표시: 계정 이름 부서 IP
         display_user = user_cookie or client_ip
+        if meta_dict:
+            name = meta_dict.get('Username') or meta_dict.get('username')
+            dept = meta_dict.get('DeptName') or meta_dict.get('department')
+            parts = []
+            if user_cookie: parts.append(user_cookie)
+            if name: parts.append(name)
+            if dept: parts.append(dept)
+            parts.append(client_ip)
+            display_user = " | ".join(parts)
         endpoint = str(request.url.path)
         method = request.method
         status = response.status_code
@@ -1021,14 +1031,22 @@ class ClassifyDeleteBatchReq(BaseModel):
 
 # ======================== Endpoints ========================
 @app.get("/api/files")
-async def get_files(path: Optional[str] = None):
+async def get_files(path: Optional[str] = None, prefer: Optional[str] = None):
     try:
         target = safe_resolve_path(path)
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
         if any(x in str(target).replace('\\', '/') for x in ['classification', 'images', 'labels']):
             _dircache_invalidate(target)
-        return {"success": True, "items": list_dir_fast(target)}
+        items = list_dir_fast(target)
+        # prefer 폴더명을 최상단에
+        if prefer:
+            try:
+                prefer_low = prefer.lower()
+                items.sort(key=lambda x: (0 if x['type']=='directory' and x['name'].lower()==prefer_low else 1, x['name'].lower()), reverse=True)
+            except Exception:
+                pass
+        return {"success": True, "items": items}
     except Exception as e:
         logger.exception(f"폴더 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1078,8 +1096,9 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
+        # 이미지가 아니면 원본 파일을 썸네일로 제공하지 않음. 단, 확장자 오인으로 200을 주지 않도록 415 처리
         if not is_supported_image(image_path):
-            raise HTTPException(status_code=400, detail="Unsupported image format")
+            raise HTTPException(status_code=415, detail="Unsupported image format")
         thumb = await generate_thumbnail(image_path, (size, size))
         st = thumb.stat()
         resp_304 = maybe_304(request, st)

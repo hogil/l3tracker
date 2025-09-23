@@ -108,7 +108,20 @@ class ThumbnailManager {
         
         // 배치 크기 제한
         const batchSize = Math.min(uncachedPaths.length, THUMB_BATCH_SIZE || 50);
-        const batch = uncachedPaths.slice(0, batchSize);
+        // 화면에 보이는 영역의 경로들을 먼저 앞쪽으로 정렬 (가시영역 우선)
+        let batch = uncachedPaths.slice(0, batchSize);
+        try {
+            const grid = document.getElementById('image-grid');
+            if (grid) {
+                const rect = grid.getBoundingClientRect();
+                const children = Array.from(grid.querySelectorAll('[data-img-path]'));
+                const visible = new Set(children.filter(el => {
+                    const r = el.getBoundingClientRect();
+                    return r.bottom >= rect.top && r.top <= rect.bottom;
+                }).map(el => el.getAttribute('data-img-path')));
+                batch.sort((a,b) => (visible.has(b) ? 1:0) - (visible.has(a) ? 1:0));
+            }
+        } catch (e) {}
         
         // 서버 배치 프리로드 시도
         try {
