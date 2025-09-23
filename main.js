@@ -306,6 +306,8 @@ class WaferMapViewer {
             fileNameText: document.getElementById('file-name-text'),
             filePathText: document.getElementById('file-path-text'),
             subfolderSelect: document.getElementById('subfolder-select'),
+            subfolderSearch: document.getElementById('subfolder-search'),
+            subfolderDropdown: document.getElementById('subfolder-dropdown'),
             browseFolderBtn: document.getElementById('browse-folder-btn'),
             refreshBtn: document.getElementById('refresh-btn'),
             addClassBtn: document.getElementById('add-class-btn'),
@@ -348,6 +350,10 @@ class WaferMapViewer {
         this.gridThumbSize = DEFAULT_THUMB_SIZE;
         this.currentFolderPath = '';
         this.selectedFolderForBrowser = '';
+        this.selectedProductName = null; // 현재 선택된 제품명
+        this.subfolderOptions = []; // 검색 가능한 폴더 옵션들
+        this.selectedSubfolderIndex = -1; // 현재 선택된 인덱스
+        this.isSearchMode = false; // 검색 모드 여부
 
         // 전역 파일 인덱스 (폴더를 열지 않아도 검색 가능)
         this.allFilesIndex = null; // string[] (ROOT 기준 상대경로, posix)
@@ -625,6 +631,238 @@ class WaferMapViewer {
         
         // 폴더 변경
         await this.changeFolder(selectedPath);
+    }
+
+    // 제품 검색 기능 설정 (기존 select 요소 유지하면서 검색 모드 추가)
+    setupProductSearch() {
+        if (!this.dom.subfolderSelect || !this.dom.subfolderSearch || !this.dom.subfolderDropdown) return;
+
+        // select 요소 클릭 시 검색 모드로 전환
+        this.dom.subfolderSelect.addEventListener('click', (e) => {
+            // 기본 드롭다운이 열리기 전에 검색 모드로 전환
+            e.preventDefault();
+            this.enterSearchMode();
+        });
+
+        // 검색 입력 필드 이벤트
+        this.dom.subfolderSearch.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            this.filterSubfolderOptions(query);
+            this.showDropdown();
+        });
+
+        // 검색 필드 포커스 아웃 시 원래 모드로 복귀 (선택되지 않은 경우)
+        this.dom.subfolderSearch.addEventListener('blur', (e) => {
+            // 드롭다운 클릭이 아닌 경우에만 검색 모드 종료
+            setTimeout(() => {
+                if (!this.dom.subfolderDropdown.matches(':hover')) {
+                    this.exitSearchMode();
+                }
+            }, 150);
+        });
+
+        // 키보드 네비게이션
+        this.dom.subfolderSearch.addEventListener('keydown', (e) => {
+            if (!this.isSearchMode) return;
+
+            switch (e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    this.navigateDropdown(1);
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    this.navigateDropdown(-1);
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    this.selectCurrentOption();
+                    break;
+                case 'Escape':
+                    this.exitSearchMode();
+                    break;
+            }
+        });
+
+        // 외부 클릭 시 검색 모드 종료
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#folder-selection')) {
+                this.exitSearchMode();
+            }
+        });
+
+        // 앱 시작 시 제품 폴더 목록 로드
+        this.loadAllProductFolders();
+    }
+
+    // 검색 모드로 전환
+    enterSearchMode() {
+        this.isSearchMode = true;
+        this.dom.subfolderSelect.style.display = 'none';
+        this.dom.subfolderSearch.style.display = 'block';
+        this.dom.subfolderSearch.focus();
+        this.dom.subfolderSearch.value = '';
+        this.showDropdown();
+    }
+
+    // 검색 모드 종료
+    exitSearchMode() {
+        this.isSearchMode = false;
+        this.dom.subfolderSearch.style.display = 'none';
+        this.dom.subfolderSelect.style.display = 'block';
+        this.hideDropdown();
+    }
+
+    // 드롭다운 옵션 필터링
+    filterSubfolderOptions(query) {
+        const dropdown = this.dom.subfolderDropdown;
+        dropdown.innerHTML = '';
+
+        const filteredOptions = this.subfolderOptions.filter(option => 
+            option.text.toLowerCase().includes(query)
+        );
+
+        if (filteredOptions.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'subfolder-dropdown-item';
+            noResults.textContent = '검색 결과가 없습니다';
+            noResults.style.color = '#999';
+            dropdown.appendChild(noResults);
+            return;
+        }
+
+        filteredOptions.forEach((option, index) => {
+            const item = document.createElement('div');
+            item.className = 'subfolder-dropdown-item';
+            item.textContent = option.text;
+            item.dataset.value = option.value;
+            item.dataset.index = index;
+
+            item.addEventListener('click', () => {
+                this.selectSearchOption(option);
+            });
+
+            dropdown.appendChild(item);
+        });
+
+        this.selectedSubfolderIndex = -1;
+    }
+
+    // 드롭다운 표시
+    showDropdown() {
+        if (this.subfolderOptions.length === 0) return;
+        
+        this.filterSubfolderOptions(this.dom.subfolderSearch.value.toLowerCase().trim());
+        this.dom.subfolderDropdown.style.display = 'block';
+    }
+
+    // 드롭다운 숨기기
+    hideDropdown() {
+        this.dom.subfolderDropdown.style.display = 'none';
+        this.selectedSubfolderIndex = -1;
+    }
+
+    // 키보드로 드롭다운 네비게이션
+    navigateDropdown(direction) {
+        const items = this.dom.subfolderDropdown.querySelectorAll('.subfolder-dropdown-item');
+        if (items.length === 0) return;
+
+        // 현재 선택 해제
+        items.forEach(item => item.classList.remove('selected'));
+
+        // 새 인덱스 계산
+        this.selectedSubfolderIndex += direction;
+        if (this.selectedSubfolderIndex < 0) {
+            this.selectedSubfolderIndex = items.length - 1;
+        } else if (this.selectedSubfolderIndex >= items.length) {
+            this.selectedSubfolderIndex = 0;
+        }
+
+        // 새 선택 적용
+        items[this.selectedSubfolderIndex].classList.add('selected');
+        items[this.selectedSubfolderIndex].scrollIntoView({ block: 'nearest' });
+    }
+
+    // 현재 선택된 옵션 선택
+    selectCurrentOption() {
+        const selectedItem = this.dom.subfolderDropdown.querySelector('.subfolder-dropdown-item.selected');
+        if (selectedItem && selectedItem.dataset.value) {
+            const option = this.subfolderOptions.find(opt => opt.value === selectedItem.dataset.value);
+            if (option) {
+                this.selectSearchOption(option);
+            }
+        }
+    }
+
+    // 검색에서 옵션 선택 처리
+    async selectSearchOption(option) {
+        this.selectedProductName = option.text.includes('🏠') ? '전체' : option.text;
+        this.exitSearchMode();
+        
+        // 기존 select 요소 업데이트
+        const selectOption = Array.from(this.dom.subfolderSelect.options).find(opt => opt.value === option.value);
+        if (selectOption) {
+            this.dom.subfolderSelect.value = option.value;
+        }
+        
+        if (option.value) {
+            await this.changeFolder(option.value);
+        }
+    }
+
+    // 전체 제품 폴더 목록 미리 로드
+    async loadAllProductFolders() {
+        try {
+            // 루트 폴더 정보 가져오기
+            const rootResponse = await fetch('/api/root-folder');
+            if (!rootResponse.ok) return;
+            
+            const rootData = await rootResponse.json();
+            const imageRootPath = rootData.root_folder;
+            
+            // 루트 폴더의 하위 폴더들 가져오기
+            const foldersResponse = await fetch(`/api/browse-folders?path=${encodeURIComponent(imageRootPath)}`);
+            if (!foldersResponse.ok) return;
+            
+            const foldersData = await foldersResponse.json();
+            const allFolders = foldersData.folders || [];
+            
+            // 시스템 폴더 제외
+            const productFolders = allFolders.filter(folder => 
+                folder.name !== 'classification' && 
+                folder.name !== 'thumbnails' &&
+                folder.name !== 'labels'
+            );
+            
+            // 검색 옵션 초기화
+            this.subfolderOptions = [];
+            
+            // 최상위 폴더 옵션 추가 (항상 첫 번째)
+            this.subfolderOptions.push({
+                value: imageRootPath,
+                text: '🏠 최상위 폴더'
+            });
+            
+            // 모든 제품 폴더 추가
+            productFolders.forEach(folder => {
+                this.subfolderOptions.push({
+                    value: folder.path,
+                    text: folder.name
+                });
+            });
+            
+            // 알파벳 순으로 정렬 (최상위 폴더는 항상 첫 번째)
+            this.subfolderOptions.sort((a, b) => {
+                if (a.text.includes('🏠')) return -1;
+                if (b.text.includes('🏠')) return 1;
+                return a.text.localeCompare(b.text);
+            });
+            
+            console.log('전체 제품 폴더 로드 완료:', this.subfolderOptions.length, '개');
+            
+        } catch (error) {
+            console.error('전체 제품 폴더 로드 실패:', error);
+        }
     }
 
     // 폴더 변경
@@ -3185,6 +3423,9 @@ class WaferMapViewer {
         this.dom.subfolderSelect.addEventListener('change', (e) => this.onSubfolderSelect(e));
         this.dom.browseFolderBtn.addEventListener('click', () => this.showFolderBrowser());
         this.dom.refreshBtn.addEventListener('click', () => this.refreshAll());
+        
+        // 검색 모드 기능 추가
+        this.setupProductSearch();
         
         // 폴더 브라우저 모달 이벤트
         this.setupFolderBrowserEvents();

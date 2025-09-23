@@ -742,6 +742,33 @@
         .context-menu-item:active {
             background: #005f9e;
         }
+
+        /* Searchable Dropdown */
+        #subfolder-search:focus {
+            outline: none;
+            border-color: #007acc !important;
+            box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+        }
+
+        .subfolder-dropdown-item {
+            padding: 8px 12px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            border-bottom: 1px solid #444;
+        }
+
+        .subfolder-dropdown-item:hover {
+            background: #007acc;
+        }
+
+        .subfolder-dropdown-item.selected {
+            background: #005f9e;
+        }
+
+        .subfolder-dropdown-item:last-child {
+            border-bottom: none;
+        }
     </style>
 </head>
 <body>
@@ -757,9 +784,17 @@
             <!-- Folder Selection -->
             <div id="folder-selection" style="padding: 8px 12px; background: #2a2a2a; border-bottom: 1px solid #444;">
                 <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                    <select id="subfolder-select" style="flex: 1; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 6px 8px; font-size: 14px; font-weight: 500;">
-                        <option value="">제품 선택</option>
-                    </select>
+                    <div style="position: relative; flex: 1;">
+                        <!-- 기존 select 요소 (기본 모드) -->
+                        <select id="subfolder-select" style="width: 100%; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 6px 8px; font-size: 14px; font-weight: 500;">
+                            <option value="">제품 선택</option>
+                        </select>
+                        <!-- 검색 입력 필드 (검색 모드) -->
+                        <input type="text" id="subfolder-search" placeholder="제품 검색..." style="display: none; width: 100%; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 6px 8px; font-size: 14px; font-weight: 500;" autocomplete="off">
+                        <!-- 검색 결과 드롭다운 -->
+                        <div id="subfolder-dropdown" style="position: absolute; top: 100%; left: 0; right: 0; background: #333; border: 1px solid #555; border-top: none; border-radius: 0 0 4px 4px; max-height: 200px; overflow-y: auto; display: none; z-index: 1000;">
+                        </div>
+                    </div>
                     <button id="browse-folder-btn" class="grid-btn" style="padding: 4px 8px; font-size: 12px;" aria-label="폴더 찾기">🔍</button>
                 </div>
             </div>
