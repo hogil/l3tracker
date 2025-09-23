@@ -8,21 +8,6 @@ L3Tracker 웨이퍼맵 뷰어의 환경변수 설정 방법을 Windows 11과 Ubu
 ### 1. UVICORN_WORKERS (서버 워커 수)
 서버의 동시 처리 워커 수를 설정합니다.
 
-#### Windows 11
-```powershell
-# 시스템 환경변수 (영구)
-[Environment]::SetEnvironmentVariable("UVICORN_WORKERS", "16", "Machine")
-
-# 사용자 환경변수 (영구)
-[Environment]::SetEnvironmentVariable("UVICORN_WORKERS", "16", "User")
-
-# 현재 세션에서만
-$env:UVICORN_WORKERS = "16"
-
-# 환경변수 확인
-echo $env:UVICORN_WORKERS
-```
-
 #### Ubuntu 24
 ```bash
 # 시스템 전체 설정
@@ -39,13 +24,23 @@ export UVICORN_WORKERS=16
 echo $UVICORN_WORKERS
 ```
 
-### 2. PROJECT_ROOT (이미지 루트 디렉토리)
-웨이퍼맵 이미지가 저장된 루트 디렉토리를 설정합니다.
-
 #### Windows 11
 ```powershell
-[Environment]::SetEnvironmentVariable("PROJECT_ROOT", "D:\wafer_images", "User")
+# 시스템 환경변수 (영구)
+[Environment]::SetEnvironmentVariable("UVICORN_WORKERS", "16", "Machine")
+
+# 사용자 환경변수 (영구)
+[Environment]::SetEnvironmentVariable("UVICORN_WORKERS", "16", "User")
+
+# 현재 세션에서만
+$env:UVICORN_WORKERS = "16"
+
+# 환경변수 확인
+echo $env:UVICORN_WORKERS
 ```
+
+### 2. PROJECT_ROOT (이미지 루트 디렉토리)
+웨이퍼맵 이미지가 저장된 루트 디렉토리를 설정합니다.
 
 #### Ubuntu 24
 ```bash
@@ -53,14 +48,13 @@ echo 'export PROJECT_ROOT="/home/user/wafer_images"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 3. HOST, PORT (서버 주소/포트)
-서버가 바인딩할 주소와 포트를 설정합니다.
-
 #### Windows 11
 ```powershell
-[Environment]::SetEnvironmentVariable("HOST", "0.0.0.0", "User")
-[Environment]::SetEnvironmentVariable("PORT", "8080", "User")
+[Environment]::SetEnvironmentVariable("PROJECT_ROOT", "D:\\wafer_images", "User")
 ```
+
+### 3. HOST, PORT (서버 주소/포트)
+서버가 바인딩할 주소와 포트를 설정합니다.
 
 #### Ubuntu 24
 ```bash
@@ -69,16 +63,14 @@ echo 'export PORT="8080"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 4. HTTPS 설정
-HTTPS 사용 여부와 인증서 경로를 설정합니다.
-
 #### Windows 11
 ```powershell
-[Environment]::SetEnvironmentVariable("SSL_ENABLED", "1", "User")
-[Environment]::SetEnvironmentVariable("HTTPS_PORT", "8443", "User")
-[Environment]::SetEnvironmentVariable("SSL_CERTFILE", "cert/fullchain.pem", "User")
-[Environment]::SetEnvironmentVariable("SSL_KEYFILE", "cert/server.key", "User")
+[Environment]::SetEnvironmentVariable("HOST", "0.0.0.0", "User")
+[Environment]::SetEnvironmentVariable("PORT", "8080", "User")
 ```
+
+### 4. HTTPS 설정
+HTTPS 사용 여부와 인증서 경로를 설정합니다.
 
 #### Ubuntu 24
 ```bash
@@ -89,41 +81,58 @@ echo 'export SSL_KEYFILE="cert/server.key"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+#### Windows 11
+```powershell
+[Environment]::SetEnvironmentVariable("SSL_ENABLED", "1", "User")
+[Environment]::SetEnvironmentVariable("HTTPS_PORT", "8443", "User")
+[Environment]::SetEnvironmentVariable("SSL_CERTFILE", "cert/fullchain.pem", "User")
+[Environment]::SetEnvironmentVariable("SSL_KEYFILE", "cert/server.key", "User")
+```
+
 ## 선택적 환경변수
 
 ### 5. 썸네일 설정
-```bash
-# Windows
-[Environment]::SetEnvironmentVariable("THUMBNAIL_SIZE", "512", "User")
-[Environment]::SetEnvironmentVariable("THUMBNAIL_FORMAT", "WEBP", "User")
-[Environment]::SetEnvironmentVariable("THUMBNAIL_QUALITY", "100", "User")
 
-# Ubuntu
+#### Ubuntu 24
+```bash
 echo 'export THUMBNAIL_SIZE="512"' >> ~/.bashrc
 echo 'export THUMBNAIL_FORMAT="WEBP"' >> ~/.bashrc
 echo 'export THUMBNAIL_QUALITY="100"' >> ~/.bashrc
 ```
 
-### 6. 성능 튜닝
-```bash
-# Windows
-[Environment]::SetEnvironmentVariable("IO_THREADS", "16", "User")
-[Environment]::SetEnvironmentVariable("THUMBNAIL_SEM", "32", "User")
-[Environment]::SetEnvironmentVariable("DIRLIST_CACHE_SIZE", "1024", "User")
+#### Windows 11
+```powershell
+[Environment]::SetEnvironmentVariable("THUMBNAIL_SIZE", "512", "User")
+[Environment]::SetEnvironmentVariable("THUMBNAIL_FORMAT", "WEBP", "User")
+[Environment]::SetEnvironmentVariable("THUMBNAIL_QUALITY", "100", "User")
+```
 
-# Ubuntu
+### 6. 성능 튜닝
+
+#### Ubuntu 24
+```bash
 echo 'export IO_THREADS="16"' >> ~/.bashrc
 echo 'export THUMBNAIL_SEM="32"' >> ~/.bashrc
 echo 'export DIRLIST_CACHE_SIZE="1024"' >> ~/.bashrc
 ```
 
-### 7. 디버그/개발 설정
-```bash
-# Windows
-[Environment]::SetEnvironmentVariable("RELOAD", "0", "User")  # 개발 시 1로 설정
+#### Windows 11
+```powershell
+[Environment]::SetEnvironmentVariable("IO_THREADS", "16", "User")
+[Environment]::SetEnvironmentVariable("THUMBNAIL_SEM", "32", "User")
+[Environment]::SetEnvironmentVariable("DIRLIST_CACHE_SIZE", "1024", "User")
+```
 
-# Ubuntu
+### 7. 디버그/개발 설정
+
+#### Ubuntu 24
+```bash
 echo 'export RELOAD="0"' >> ~/.bashrc  # 개발 시 1로 설정
+```
+
+#### Windows 11
+```powershell
+[Environment]::SetEnvironmentVariable("RELOAD", "0", "User")  # 개발 시 1로 설정
 ```
 
 ## 환경변수 확인

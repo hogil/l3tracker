@@ -472,10 +472,17 @@ class WaferMapViewer {
             this.dom.viewerContainer.classList.remove('single-image-mode');
         }
         
+        // 파일명 표시 및 현재 선택 이미지 경로 초기화
+        if (this.dom.fileNameDisplay) this.dom.fileNameDisplay.style.display = 'none';
+        if (this.dom.fileNameText) this.dom.fileNameText.textContent = '';
+        if (this.dom.filePathText) this.dom.filePathText.textContent = '';
+        this.selectedImagePath = '';
+        this.currentImage = null;
+        this.currentImageBitmap = null;
+
         // 상단 패널과 줌바는 항상 표시
         const viewControls = document.querySelector('.view-controls');
         if (viewControls) viewControls.style.display = 'flex';
-        if (this.dom.fileNameDisplay) this.dom.fileNameDisplay.style.display = 'block';
     }
 
     // 파일명 표시
@@ -3274,6 +3281,21 @@ class WaferMapViewer {
         this.transform.dx = (containerRect.width - this.currentImage.width * this.transform.scale) / 2;
         // 파일명 패널 높이를 고려하여 적절히 위치 조정 (위로 이동)
         this.transform.dy = (containerRect.height - this.currentImage.height * this.transform.scale) / 2 + (filenameBarHeight * 0.4);
+        // 리셋 시 반영된 배율을 렌더러에도 즉시 전달하여 픽셀 감소 로직이 동작하도록 함
+        if (this.semiconductorRenderer) {
+            try {
+                this.semiconductorRenderer.setScale(this.transform.scale);
+                if (typeof this.semiconductorRenderer.getInfo === 'function') {
+                    const info = this.semiconductorRenderer.getInfo();
+                    console.debug('[ResetView] scale=', this.transform.scale.toFixed(3), info);
+                } else {
+                    console.debug('[ResetView] scale=', this.transform.scale.toFixed(3));
+                }
+            } catch (e) {
+                console.warn('SemiconductorRenderer.setScale 실패:', e);
+            }
+        }
+
         this.updateZoomDisplay();
         if (shouldDraw) this.scheduleDraw();
     }
