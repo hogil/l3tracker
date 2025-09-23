@@ -308,8 +308,7 @@ class WaferMapViewer {
             subfolderSelect: document.getElementById('subfolder-select'),
             subfolderSearch: document.getElementById('subfolder-search'),
             subfolderDropdown: document.getElementById('subfolder-dropdown'),
-            browseFolderBtn: document.getElementById('browse-folder-btn'),
-            refreshBtn: document.getElementById('refresh-btn'),
+            // 제거됨: browseFolderBtn, refreshBtn
             addClassBtn: document.getElementById('add-class-btn'),
             newClassInput: document.getElementById('new-class-input'),
             classList: document.getElementById('class-list'),
@@ -3131,7 +3130,22 @@ class WaferMapViewer {
             this.currentImageBitmap = await createImageBitmap(blob);
             this.currentImage = this.currentImageBitmap;
             this.selectedImagePath = path; // 단일 이미지 모드를 위한 경로 설정
-            this.resetView(false);
+            
+            // SemiconductorRenderer가 있으면 현재 비트맵으로 직접 로드 (동일 소스 보장)
+            if (this.semiconductorRenderer) {
+                console.log(`🔍 [DEBUG] SemiconductorRenderer에 이미지 로드 시작 (ImageBitmap)`);
+                await this.semiconductorRenderer.loadImage(this.currentImageBitmap);
+                console.log(`🔍 [DEBUG] SemiconductorRenderer 이미지 로드 완료`);
+                // 초기 zoom 설정
+                this.semiconductorRenderer.setScale(this.transform.scale);
+                this.resetView(false);
+                this.scheduleDraw();
+            } else {
+                console.log(`🔍 [DEBUG] SemiconductorRenderer 없음 - 기존 방식 사용`);
+                this.resetView(false);
+                this.scheduleDraw();
+            }
+            
             this.dom.minimapContainer.style.display = 'block';
             this.dom.imageCanvas.style.display = 'block';
             this.dom.overlayCanvas.style.display = 'block';
@@ -3146,7 +3160,6 @@ class WaferMapViewer {
             }
             
             // 레이아웃 안정화 후 한 번 더 맞춤 (컨테이너 크기 반영)
-            this.scheduleDraw();
             setTimeout(() => {
                 // 이미지가 표시된 후 컨테이너 rect가 변하는 경우 재계산
                 this.resetView(true);
@@ -3194,14 +3207,37 @@ class WaferMapViewer {
         this.imageCtx.fillStyle = '#000';
         this.imageCtx.fillRect(0, 0, width, height);
         this.imageCtx.restore();
-        // Draw the image with pixel-perfect rendering (no interpolation)
-        this.imageCtx.save();
-        // Disable image smoothing for pixel-perfect display
-        setPixelPerfectRendering(this.imageCtx);
-        this.imageCtx.translate(this.transform.dx, this.transform.dy);
-        this.imageCtx.scale(this.transform.scale, this.transform.scale);
-        this.imageCtx.drawImage(this.currentImage, 0, 0);
-        this.imageCtx.restore();
+        
+        // SemiconductorRenderer 사용 시 - 가벼운 pixel 최적화
+        if (this.semiconductorRenderer && this.semiconductorRenderer.currentImage) {
+            // 렌더링 정보 로그
+            const info = this.semiconductorRenderer.getInfo();
+            console.log(`🔍 [DEBUG] Zoom: ${info.scalePercent}%, 피라미드: ${info.pyramidLevel}, 픽셀: ${info.pixelReduction}`);
+            
+            // 피라미드 이미지 선택
+            const selectedImage = this.semiconductorRenderer.selectPyramidLevel();
+            
+            // 기존 방식대로 그리기
+            this.imageCtx.save();
+            setPixelPerfectRendering(this.imageCtx);
+            this.imageCtx.translate(this.transform.dx, this.transform.dy);
+            this.imageCtx.scale(this.transform.scale, this.transform.scale);
+            
+            // 선택된 피라미드 이미지를 원본 크기로 확대하여 그리기
+            const scaleToOriginal = this.currentImage.width / selectedImage.width;
+            this.imageCtx.scale(scaleToOriginal, scaleToOriginal);
+            this.imageCtx.drawImage(selectedImage, 0, 0);
+            
+            this.imageCtx.restore();
+        } else {
+            // 기존 렌더링 코드 (폴백)
+            this.imageCtx.save();
+            setPixelPerfectRendering(this.imageCtx);
+            this.imageCtx.translate(this.transform.dx, this.transform.dy);
+            this.imageCtx.scale(this.transform.scale, this.transform.scale);
+            this.imageCtx.drawImage(this.currentImage, 0, 0);
+            this.imageCtx.restore();
+        }
         this.updateMinimap();
     }
     
@@ -3296,6 +3332,11 @@ class WaferMapViewer {
         this.transform.dy = y - (y - this.transform.dy) * scale;
         this.transform.scale = newScale;
 
+        // SemiconductorRenderer에 zoom 전달
+        if (this.semiconductorRenderer) {
+            this.semiconductorRenderer.setScale(this.transform.scale);
+        }
+
         this.updateZoomDisplay();
         this.scheduleDraw();
     }
@@ -3346,9 +3387,17 @@ class WaferMapViewer {
     // --- MINIMAP ---
     updateMinimap() {
         if (!this.currentImage) return;
-        // 미니맵 크기 및 이미지 크기
-        const mapW = this.dom.minimapCanvas.width = this.dom.minimapContainer.offsetWidth;
-        const mapH = this.dom.minimapCanvas.height = this.dom.minimapContainer.offsetHeight;
+        // 미니맵 고정 해상도(고품질) 현재 대비 90% → 230x230
+        const mapW = this.dom.minimapCanvas.width = 230;
+        const mapH = this.dom.minimapCanvas.height = 230;
+        // 컨테이너/스타일도 동일 크기로 고정하여 오프셋 불일치 제거
+        if (this.dom.minimapContainer) {
+            this.dom.minimapContainer.style.width = mapW + 'px';
+            this.dom.minimapContainer.style.height = mapH + 'px';
+            this.dom.minimapContainer.style.position = this.dom.minimapContainer.style.position || 'relative';
+        }
+        this.dom.minimapCanvas.style.width = mapW + 'px';
+        this.dom.minimapCanvas.style.height = mapH + 'px';
         const imgW = this.currentImage.width;
         const imgH = this.currentImage.height;
         // 이미지 전체를 미니맵에 fit (pad 포함)
@@ -3358,7 +3407,8 @@ class WaferMapViewer {
         this.minimapCtx.clearRect(0, 0, mapW, mapH);
         
         // 픽셀 완벽한 렌더링을 위해 이미지 스무딩 비활성화
-        setPixelPerfectRendering(this.minimapCtx);
+        this.minimapCtx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in this.minimapCtx) this.minimapCtx.imageSmoothingQuality = 'high';
         
         this.minimapCtx.drawImage(this.currentImage, padX, padY, imgW * scale, imgH * scale);
         // 메인 뷰의 영역(이미지 좌표계) → 미니맵 좌표계로 변환
@@ -3368,12 +3418,19 @@ class WaferMapViewer {
         const viewY = -this.transform.dy / viewScale;
         const vpX = padX + viewX * scale;
         const vpY = padY + viewY * scale;
-        const vpW = viewW / viewScale * scale;
-        const vpH = viewH / viewScale * scale;
+        let vpW = viewW / viewScale * scale;
+        let vpH = viewH / viewScale * scale;
+        // 뷰포트 10% 축소로 시각적 여유 확보
+        const shrink = 0.9;
+        const newVpW = vpW * shrink;
+        const newVpH = vpH * shrink;
+        const dx = (vpW - newVpW) / 2;
+        const dy = (vpH - newVpH) / 2;
+        vpW = newVpW; vpH = newVpH;
         // 뷰포트 사각형 스타일 적용
         const vp = this.dom.minimapViewport.style;
-        vp.left = `${vpX}px`;
-        vp.top = `${vpY}px`;
+        vp.left = `${vpX + dx}px`;
+        vp.top = `${vpY + dy}px`;
         vp.width = `${vpW}px`;
         vp.height = `${vpH}px`;
         vp.display = 'block';
@@ -3421,14 +3478,13 @@ class WaferMapViewer {
         
         // 폴더 관련 이벤트 리스너
         this.dom.subfolderSelect.addEventListener('change', (e) => this.onSubfolderSelect(e));
-        this.dom.browseFolderBtn.addEventListener('click', () => this.showFolderBrowser());
-        this.dom.refreshBtn.addEventListener('click', () => this.refreshAll());
+        // 제거됨: 폴더 브라우저/새로고침 버튼 리스너
         
         // 검색 모드 기능 추가
         this.setupProductSearch();
         
         // 폴더 브라우저 모달 이벤트
-        this.setupFolderBrowserEvents();
+        // 제거됨: 폴더 브라우저 모달 이벤트
     }
 
     async refreshClassList() {

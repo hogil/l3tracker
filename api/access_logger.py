@@ -68,17 +68,19 @@ class AccessLogger:
             return
             
         client_ip = self.get_client_ip(request)
+        user_cookie = request.cookies.get("session_user") or None
+        display_user = user_cookie or client_ip
         method = request.method
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # 추가 정보 추출
         extra_info = self._extract_extra_info(request, endpoint, method)
         
-        # 테이블 형식 로그 생성
-        self._log_table_format(timestamp, client_ip, method, endpoint, status_code, extra_info)
+        # 테이블 형식 로그 생성 (계정 우선 표시)
+        self._log_table_format(timestamp, display_user, method, endpoint, status_code, extra_info)
         
-        # 통계 업데이트
-        self._update_stats(client_ip, endpoint, method)
+        # 통계 업데이트 (계정 기준 우선)
+        self._update_stats(client_ip, endpoint, method, user_id_override=user_cookie)
     
     def _extract_extra_info(self, request: Request, endpoint: str, method: str) -> str:
         """요청에서 파일명, 클래스명 등 추가 정보 추출"""
@@ -294,7 +296,7 @@ class AccessLogger:
         
         return False
     
-    def _update_stats(self, ip: str, endpoint: str, method: str):
+    def _update_stats(self, ip: str, endpoint: str, method: str, user_id_override: Optional[str] = None, meta: Optional[Dict[str, Any]] = None):
         """통계 업데이트 - 세션 관리 포함"""
         # localhost IP 제외
         if ip in ['127.0.0.1', '::1', 'localhost']:
@@ -303,7 +305,21 @@ class AccessLogger:
         today = datetime.now().strftime('%Y-%m-%d')
         now_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         now_unix = time.time()
-        user_id = ip  # IP를 사용자 ID로 사용
+        # 계정 기반 사용자 식별: override 우선, 없으면 IP
+        user_id = (user_id_override or ip)
+        profile_meta: Dict[str, Any] = {}
+        if user_id and '@' in user_id:
+            try:
+                account, pc = user_id.split('@', 1)
+                profile_meta["account"] = account
+                profile_meta["pc"] = pc
+            except Exception:
+                pass
+        if meta and isinstance(meta, dict):
+            for k in ("company", "department", "team", "title", "email", "account", "pc"):
+                v = meta.get(k)
+                if v:
+                    profile_meta[k] = v
         
         # 초 단위 중복 요청 체크 (같은 시분초에 같은 IP면 제외)
         second_timestamp = int(now_unix)  # 초 단위로 그룹핑
@@ -343,10 +359,17 @@ class AccessLogger:
                 "current_session_start": now_timestamp,  # 현재 세션 시작 시간
                 "daily_requests": {},
                 "endpoints": {},
-                "sessions": []  # 세션 히스토리
+                "sessions": [],  # 세션 히스토리
+                "profile": {}
             }
         
         user_data = self.stats_data["users"][user_id]
+        if "profile" not in user_data:
+            user_data["profile"] = {}
+        if profile_meta:
+            for k, v in profile_meta.items():
+                if v:
+                    user_data["profile"][k] = v
         user_data["total_requests"] += 1
         user_data["last_seen"] = today
         user_data["last_access_time"] = now_timestamp
@@ -380,7 +403,11 @@ class AccessLogger:
             self.stats_data["daily_stats"][today] = {
                 "active_users": [],
                 "new_users": [],
-                "total_requests": 0
+                "total_requests": 0,
+                "by_department": {},
+                "by_team": {},
+                "by_company": {},
+                "by_org_url": {}
             }
         
         daily = self.stats_data["daily_stats"][today]
@@ -402,7 +429,11 @@ class AccessLogger:
                 "active_users": [],
                 "new_users": [],
                 "total_requests": 0,
-                "month_name": datetime.strptime(month + "-01", "%Y-%m-%d").strftime("%Y년 %m월")
+                "month_name": datetime.strptime(month + "-01", "%Y-%m-%d").strftime("%Y년 %m월"),
+                "by_department": {},
+                "by_team": {},
+                "by_company": {},
+                "by_org_url": {}
             }
         
         monthly = self.stats_data["monthly_stats"][month]
@@ -415,6 +446,25 @@ class AccessLogger:
         if user_data["first_seen"].startswith(month):
             if user_id not in monthly["new_users"]:
                 monthly["new_users"].append(user_id)
+        # 부서/팀/회사 카운트
+        dept = user_data.get("profile", {}).get("department")
+        team = user_data.get("profile", {}).get("team")
+        company = user_data.get("profile", {}).get("company")
+        if dept:
+            daily["by_department"][dept] = daily["by_department"].get(dept, 0) + 1
+            monthly["by_department"][dept] = monthly["by_department"].get(dept, 0) + 1
+        if team:
+            daily["by_team"][team] = daily["by_team"].get(team, 0) + 1
+            monthly["by_team"][team] = monthly["by_team"].get(team, 0) + 1
+        if company:
+            daily["by_company"][company] = daily["by_company"].get(company, 0) + 1
+            monthly["by_company"][company] = monthly["by_company"].get(company, 0) + 1
+        org_url = user_data.get("profile", {}).get("org_url")
+        if org_url:
+            daily.setdefault("by_org_url", {})
+            monthly.setdefault("by_org_url", {})
+            daily["by_org_url"][org_url] = daily["by_org_url"].get(org_url, 0) + 1
+            monthly["by_org_url"][org_url] = monthly["by_org_url"].get(org_url, 0) + 1
         
         # 통계 저장
         self._save_stats()

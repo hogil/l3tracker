@@ -47,10 +47,13 @@ class SemiconductorRenderer {
         };
         
         // 상태 초기화
-        this.currentImage = null;
-        this.imagePyramid = {};
+        this.currentImage = null; // HTMLImageElement | ImageBitmap
+        this.imagePyramid = {};   // key -> ImageBitmap
         this.scale = 1.0;
         this.isGeneratingPyramid = false;
+        this.generatingLevels = new Set(); // 진행 중인 레벨 키
+        this.imageVersion = 0;            // 현재 이미지 버전
+        this.pyramidVersion = 0;          // 피라미드 버전 (검증용)
         
         this.setupPixelPerfectCanvas();
     }
@@ -108,15 +111,25 @@ class SemiconductorRenderer {
      * @returns {Promise<void>}
      */
     async loadImage(image) {
-        if (!image || !(image instanceof HTMLImageElement)) {
-            throw new Error('유효한 이미지 엘리먼트가 필요합니다.');
+        // HTMLImageElement 또는 ImageBitmap 허용
+        const isValid = (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) || image instanceof HTMLImageElement;
+        if (!isValid) {
+            throw new Error('유효한 이미지 타입이 아닙니다. (HTMLImageElement | ImageBitmap)');
         }
 
+        // 버전 증가 및 캐시 초기화
+        this.imageVersion += 1;
+        const version = this.imageVersion;
         this.currentImage = image;
+        this.imagePyramid = { '1': image }; // 항상 원본은 현재 이미지
+        this.pyramidVersion = version;
+        this.generatingLevels.clear();
+        this.isGeneratingPyramid = false;
         
-        // 이미지 피라미드 생성
+        // 이미지 피라미드 "비차단" 생성 (백그라운드)
         if (this.options.usePyramid) {
-            await this.generateImagePyramid(image);
+            // await 하지 않음 → UI 블로킹 방지
+            this.generateImagePyramid(image, version).catch(() => {/* 무시: 백그라운드 작업 */});
         }
         
         this.render();
@@ -127,33 +140,50 @@ class SemiconductorRenderer {
      * @param {HTMLImageElement} image - 원본 이미지
      * @returns {Promise<void>}
      */
-    async generateImagePyramid(image) {
+    async generateImagePyramid(image, version) {
         if (this.isGeneratingPyramid) {
             this.log('이미지 피라미드 생성 중... 중복 요청 무시');
             return;
         }
 
         this.isGeneratingPyramid = true;
-        this.log('이미지 피라미드 생성 시작...');
+        this.log('이미지 피라미드 생성 시작... (비동기)');
         
         try {
-            // 원본 이미지
+            // 원본은 즉시 사용 (ImageBitmap 보장 필요 없음)
+            // 버전이 바뀌었으면 중단
+            if (version !== this.imageVersion) return;
             this.imagePyramid['1'] = image;
-            
-            // 병렬 처리로 피라미드 레벨 생성
-            const [halfImage, quarterImage] = await Promise.all([
-                this.createDownscaledImage(image, 0.5),
-                this.createDownscaledImage(image, 0.25)
-            ]);
-            
-            this.imagePyramid['0.5'] = halfImage;
-            this.imagePyramid['0.25'] = quarterImage;
-            
-            this.log('이미지 피라미드 생성 완료:', {
-                '원본': `${image.width}x${image.height}`,
-                '1/2': `${halfImage.width}x${halfImage.height}`,
-                '1/4': `${quarterImage.width}x${quarterImage.height}`
-            });
+
+            // 1/2, 1/5 레벨을 백그라운드 생성 (toDataURL 미사용, ImageBitmap로 바로 생성)
+            const schedule = (key, scale) => {
+                if (this.generatingLevels.has(key) || this.imagePyramid[key]) return;
+                this.generatingLevels.add(key);
+                // 유휴 시간에 작업 (fallback: 즉시)
+                const runner = async () => {
+                    try {
+                        const bmp = await this.createResizedBitmap(image, scale);
+                        // 최신 이미지인지 확인 후 반영
+                        if (version === this.imageVersion) {
+                            this.imagePyramid[key] = bmp;
+                            this.pyramidVersion = version;
+                            this.log(`피라미드 레벨 준비 완료: ${key} (${bmp.width}x${bmp.height})`);
+                        }
+                    } catch (e) {
+                        console.warn(`레벨 생성 실패: ${key}`, e);
+                    } finally {
+                        this.generatingLevels.delete(key);
+                    }
+                };
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(() => runner());
+                } else {
+                    setTimeout(() => runner(), 0);
+                }
+            };
+
+            schedule('0.5', 0.5);
+            schedule('0.2', 0.2);
         } catch (error) {
             console.error('이미지 피라미드 생성 실패:', error);
         } finally {
@@ -167,85 +197,26 @@ class SemiconductorRenderer {
      * @param {number} scale - 축소 비율 (0 < scale <= 1)
      * @returns {Promise<HTMLImageElement>}
      */
-    async createDownscaledImage(srcImage, scale) {
-        return new Promise((resolve, reject) => {
-            const dstWidth = Math.floor(srcImage.width * scale);
-            const dstHeight = Math.floor(srcImage.height * scale);
-            
-            // 작업용 캔버스 생성
-            const canvas = document.createElement('canvas');
+    async createResizedBitmap(srcImage, scale) {
+        const dstWidth = Math.max(1, Math.floor(srcImage.width * scale));
+        const dstHeight = Math.max(1, Math.floor(srcImage.height * scale));
+        const hasOffscreen = typeof OffscreenCanvas !== 'undefined';
+        const canvas = hasOffscreen ? new OffscreenCanvas(dstWidth, dstHeight) : document.createElement('canvas');
+        if (!hasOffscreen) {
             canvas.width = dstWidth;
             canvas.height = dstHeight;
-            const ctx = canvas.getContext('2d', {
-                alpha: false,
-                desynchronized: true
-            });
-            
-            // 픽셀 완벽 설정
-            ctx.imageSmoothingEnabled = false;
-            
-            // 원본 데이터 추출
-            const srcCanvas = document.createElement('canvas');
-            srcCanvas.width = srcImage.width;
-            srcCanvas.height = srcImage.height;
-            const srcCtx = srcCanvas.getContext('2d');
-            srcCtx.imageSmoothingEnabled = false;
-            srcCtx.drawImage(srcImage, 0, 0);
-            
-            const srcData = srcCtx.getImageData(0, 0, srcImage.width, srcImage.height);
-            const srcPixels = srcData.data;
-            const dstData = ctx.createImageData(dstWidth, dstHeight);
-            const dstPixels = dstData.data;
-            
-            const invScale = 1 / scale;
-            
-            // Lanczos3 다운샘플링
-            for (let y = 0; y < dstHeight; y++) {
-                for (let x = 0; x < dstWidth; x++) {
-                    const srcX = x * invScale;
-                    const srcY = y * invScale;
-                    
-                    let r = 0, g = 0, b = 0, totalWeight = 0;
-                    
-                    // Lanczos3 커널 적용 (반경 3)
-                    const kernelRadius = 3;
-                    for (let ky = -kernelRadius; ky <= kernelRadius; ky++) {
-                        for (let kx = -kernelRadius; kx <= kernelRadius; kx++) {
-                            const sx = Math.floor(srcX + kx);
-                            const sy = Math.floor(srcY + ky);
-                            
-                            if (sx >= 0 && sx < srcImage.width && sy >= 0 && sy < srcImage.height) {
-                                const weight = this.lanczos3Weight(srcX - sx, srcY - sy);
-                                
-                                if (weight > 0) {
-                                    const idx = (sy * srcImage.width + sx) * 4;
-                                    r += srcPixels[idx] * weight;
-                                    g += srcPixels[idx + 1] * weight;
-                                    b += srcPixels[idx + 2] * weight;
-                                    totalWeight += weight;
-                                }
-                            }
-                        }
-                    }
-                    
-                    const dstIdx = (y * dstWidth + x) * 4;
-                    if (totalWeight > 0) {
-                        dstPixels[dstIdx] = Math.min(255, Math.max(0, Math.round(r / totalWeight)));
-                        dstPixels[dstIdx + 1] = Math.min(255, Math.max(0, Math.round(g / totalWeight)));
-                        dstPixels[dstIdx + 2] = Math.min(255, Math.max(0, Math.round(b / totalWeight)));
-                        dstPixels[dstIdx + 3] = 255;
-                    }
-                }
-            }
-            
-            ctx.putImageData(dstData, 0, 0);
-            
-            // 이미지 객체로 변환
-            const resultImage = new Image();
-            resultImage.onload = () => resolve(resultImage);
-            resultImage.onerror = reject;
-            resultImage.src = canvas.toDataURL('image/png');
-        });
+        }
+        const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+        // 다운스케일 품질 우선
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+        ctx.clearRect(0, 0, dstWidth, dstHeight);
+        ctx.drawImage(srcImage, 0, 0, dstWidth, dstHeight);
+
+        if (hasOffscreen) {
+            return canvas.transferToImageBitmap();
+        }
+        return await createImageBitmap(canvas);
     }
     
     /**
@@ -255,10 +226,10 @@ class SemiconductorRenderer {
      * @returns {number} 가중치 값
      */
     lanczos3Weight(x, y) {
+        // 더 이상 사용하지 않지만, 하위 호환 유지 (미사용)
         const r = Math.sqrt(x * x + y * y);
         if (r === 0) return 1;
         if (r >= 3) return 0;
-        
         const piR = Math.PI * r;
         const piR3 = piR / 3;
         return (Math.sin(piR) / piR) * (Math.sin(piR3) / piR3);
@@ -277,75 +248,48 @@ class SemiconductorRenderer {
     
     /**
      * 메인 렌더링 함수
+     * 핵심: 캔버스 크기는 항상 원본 × zoom으로 유지하고, 내부 픽셀 데이터만 변경
      */
     render() {
         if (!this.currentImage) return;
         
-        // 적절한 피라미드 레벨 선택
-        const { image, effectiveScale } = this.selectPyramidLevel();
-        
-        // 최종 렌더링 크기 계산
-        const dstWidth = Math.floor(this.currentImage.width * this.scale);
-        const dstHeight = Math.floor(this.currentImage.height * this.scale);
-        
-        // 캔버스 크기 설정
-        this.canvas.width = dstWidth;
-        this.canvas.height = dstHeight;
-        this.canvas.style.width = `${dstWidth}px`;
-        this.canvas.style.height = `${dstHeight}px`;
-        
-        // 컨텍스트 재설정
-        this.setupPixelPerfectCanvas();
-        
-        // 배경 초기화
-        this.ctx.fillStyle = '#000';
-        this.ctx.fillRect(0, 0, dstWidth, dstHeight);
-        
-        // 이미지 렌더링
-        const renderWidth = Math.floor(image.width * effectiveScale);
-        const renderHeight = Math.floor(image.height * effectiveScale);
-        
-        this.ctx.drawImage(
-            image, 
-            0, 0, image.width, image.height,
-            0, 0, renderWidth, renderHeight
-        );
+        // 이 렌더러는 이제 외부(main.js)가 사용 여부를 제어하므로
+        // 내부에서 자동으로 캔버스를 다시 그리지 않음.
+        // selectPyramidLevel()과 createDownscaledImage()만 제공하는 헬퍼 역할.
+        // 하지만 피라미드 생성은 여전히 필요하므로 loadImage에서 호출됨.
+        return;
     }
     
     /**
      * 최적의 피라미드 레벨 선택
-     * @returns {{image: HTMLImageElement, effectiveScale: number}}
+     * zoom 배율에 따라 적절한 해상도의 이미지 선택
+     * @returns {HTMLImageElement} 선택된 이미지
      */
     selectPyramidLevel() {
-        let imageToRender = this.currentImage;
-        let pyramidScale = 1.0;
-        
-        if (this.options.usePyramid && Object.keys(this.imagePyramid).length > 0) {
-            if (this.scale <= 0.25) {
-                // 25% 이하: 1/4 크기 이미지 사용
-                const quarterImage = this.imagePyramid['0.25'];
-                if (quarterImage && quarterImage.complete && quarterImage.naturalWidth > 0) {
-                    imageToRender = quarterImage;
-                    pyramidScale = 4.0;
-                    this.log('피라미드 레벨: 1/4');
+        let selected = this.currentImage;
+
+        if (this.options.usePyramid) {
+            // 필요한 레벨 사전 보장 (비동기 생성 트리거)
+            const needFifth = this.scale <= 0.25;
+            const needHalf = !needFifth && this.scale <= 0.75;
+            if (needFifth) {
+                if (!this.imagePyramid['0.2']) {
+                    // 트리거만, 즉시 반환
+                    this.generateImagePyramid(this.currentImage, this.imageVersion).catch(() => {});
+                } else {
+                    selected = this.imagePyramid['0.2'];
                 }
-            } else if (this.scale <= 0.5) {
-                // 50% 이하: 1/2 크기 이미지 사용
-                const halfImage = this.imagePyramid['0.5'];
-                if (halfImage && halfImage.complete && halfImage.naturalWidth > 0) {
-                    imageToRender = halfImage;
-                    pyramidScale = 2.0;
-                    this.log('피라미드 레벨: 1/2');
+            } else if (needHalf) {
+                if (!this.imagePyramid['0.5']) {
+                    this.generateImagePyramid(this.currentImage, this.imageVersion).catch(() => {});
+                } else {
+                    selected = this.imagePyramid['0.5'];
                 }
             } else {
-                this.log('피라미드 레벨: 원본');
+                // 원본 유지
             }
         }
-        
-        return {
-            image: imageToRender,
-            effectiveScale: this.scale * pyramidScale
-        };
+        return selected;
     }
     
     /**
@@ -391,12 +335,16 @@ class SemiconductorRenderer {
             };
         }
         
-        let pyramidLevel = '원본';
+        let pyramidLevel = '원본 (고품질)';
+        let pixelReduction = '100%';
+        
         if (this.options.usePyramid && Object.keys(this.imagePyramid).length > 0) {
             if (this.scale <= 0.25) {
-                pyramidLevel = '1/4 크기';
-            } else if (this.scale <= 0.5) {
-                pyramidLevel = '1/2 크기';
+                pyramidLevel = '1/5 크기 (초고속)';
+                pixelReduction = '20%';
+            } else if (this.scale <= 0.75) {
+                pyramidLevel = '1/2 크기 (균형)';
+                pixelReduction = '50%';
             }
         }
         
@@ -408,8 +356,9 @@ class SemiconductorRenderer {
             scale: this.scale,
             scalePercent: Math.round(this.scale * 100),
             pyramidLevel: pyramidLevel,
+            pixelReduction: pixelReduction,
             pyramidEnabled: this.options.usePyramid,
-            renderMode: '이미지 피라미드',
+            renderMode: '적응형 픽셀 렌더링',
             isGeneratingPyramid: this.isGeneratingPyramid
         };
     }

@@ -13,15 +13,26 @@ from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request, Path as PathParam, Depends
-from fastapi.responses import JSONResponse, FileResponse, Response
+from fastapi import Response as FastAPIResponse
+from fastapi.responses import JSONResponse, FileResponse, Response, RedirectResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
+import http.client
+import urllib.parse
 
 from .access_logger import logger_instance
+
+# SAML
+try:
+    from onelogin.saml2.auth import OneLogin_Saml2_Auth
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+except Exception:
+    OneLogin_Saml2_Auth = None
+    OneLogin_Saml2_Settings = None
 from . import config
 
 # ================= Windows ANSI 색상 호환 =================
@@ -314,6 +325,329 @@ THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
 # ======================== FastAPI & Middleware ========================
 app = FastAPI(title="L3Tracker API", version="2.6.0")
 
+# ======================== SAML SSO (OneLogin python3-saml) ========================
+SAML_DIR = Path("saml")
+DEV_SAML = os.getenv("DEV_SAML", "1").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def _load_saml_files() -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    base: Dict[str, Any] = {}
+    adv: Dict[str, Any] = {}
+    try:
+        settings_path = SAML_DIR / "settings.json"
+        if settings_path.exists():
+            with open(settings_path, "r", encoding="utf-8") as f:
+                base = json.load(f)
+    except Exception as e:
+        logger.warning(f"SAML settings.json 로드 실패: {e}")
+    try:
+        adv_path = SAML_DIR / "advanced_settings.json"
+        if adv_path.exists():
+            with open(adv_path, "r", encoding="utf-8") as f:
+                adv = json.load(f)
+    except Exception as e:
+        logger.warning(f"SAML advanced_settings.json 로드 실패: {e}")
+
+    # IdP X.509 인증서를 파일에서 주입(선택)
+    try:
+        idp_pem = SAML_DIR / "certs" / "idp_x509.pem"
+        if idp_pem.exists():
+            with open(idp_pem, "r", encoding="utf-8") as c:
+                base.setdefault("idp", {})["x509cert"] = c.read()
+    except Exception as e:
+        logger.warning(f"SAML IdP 인증서 로드 실패: {e}")
+
+    # SP 서명에 사용할 키/증서가 있으면 주입(선택)
+    try:
+        sp_crt = SAML_DIR / "certs" / "sp.crt"
+        sp_key = SAML_DIR / "certs" / "sp.key"
+        if sp_crt.exists() and sp_key.exists():
+            with open(sp_crt, "r", encoding="utf-8") as c:
+                crt = c.read()
+            with open(sp_key, "r", encoding="utf-8") as k:
+                key = k.read()
+            base.setdefault("sp", {})["x509cert"] = crt
+            base["sp"]["privateKey"] = key
+    except Exception as e:
+        logger.warning(f"SAML SP 키/증서 로드 실패: {e}")
+
+    return base, adv
+
+def _prepare_fastapi_request(req: Request) -> Dict[str, Any]:
+    host = req.headers.get("x-forwarded-host") or req.headers.get("host") or req.client.host
+    proto = req.headers.get("x-forwarded-proto") or req.url.scheme
+    port = "443" if proto == "https" else "80"
+    return {
+        "http_host": host,
+        "server_port": port,
+        "script_name": req.url.path,
+        "get_data": dict(req.query_params or {}),
+        "post_data": {},
+        "https": "on" if proto == "https" else "off",
+    }
+
+def _saml_auth(req: Request) -> OneLogin_Saml2_Auth:
+    if OneLogin_Saml2_Auth is None:
+        raise HTTPException(status_code=500, detail="python3-saml 미설치")
+    # 파일 기반 로드를 사용해도 되지만, 여기서는 병합된 설정을 우선 사용
+    return OneLogin_Saml2_Auth(_prepare_fastapi_request(req), custom_base_path=str(SAML_DIR))
+
+@app.get("/saml/metadata")
+async def saml_metadata():
+    try:
+        if OneLogin_Saml2_Settings is None:
+            return PlainTextResponse("python3-saml 미설치", status_code=500)
+        base, adv = _load_saml_files()
+        combined = dict(base)
+        try:
+            # security 등 상위 키 병합
+            for k, v in (adv or {}).items():
+                combined[k] = v
+        except Exception:
+            pass
+        settings = OneLogin_Saml2_Settings(settings=combined, custom_base_path=str(SAML_DIR))
+        settings.set_strict(False)
+        metadata = settings.get_sp_metadata()
+        return Response(content=metadata, media_type="application/xml")
+    except Exception as e:
+        logger.exception(f"SAML 메타데이터 생성 실패: {e}")
+        return PlainTextResponse(f"metadata error: {e}", status_code=500)
+
+@app.get("/saml/login")
+async def saml_login(request: Request):
+    auth = _saml_auth(request)
+    # 사내 스타일 org_url 파라미터를 세션 메타에 기록할 수 있도록 쿼리 수용
+    org_url = request.query_params.get("org_url")
+    resp = RedirectResponse(auth.login())
+    if org_url:
+        meta = {"org_url": org_url}
+        try:
+            prev_meta = request.cookies.get("session_meta")
+            if prev_meta:
+                import json as _json
+                cur = _json.loads(prev_meta)
+                cur.update(meta)
+                meta = cur
+        except Exception:
+            pass
+        resp.set_cookie("session_meta", json.dumps(meta, ensure_ascii=False), max_age=7*24*3600, secure=True, httponly=False, samesite="Lax")
+    return resp
+
+@app.post("/saml/acs")
+async def saml_acs(request: Request):
+    if OneLogin_Saml2_Auth is None:
+        return PlainTextResponse("python3-saml 미설치", status_code=500)
+    form = dict(await request.form())
+    req_dict = _prepare_fastapi_request(request)
+    req_dict["post_data"] = form
+    auth = OneLogin_Saml2_Auth(req_dict, custom_base_path=str(SAML_DIR))
+    try:
+        auth.process_response()
+        errors = auth.get_errors()
+    except Exception as e:
+        # 개발 모드: 예외 발생 시에도 사용자 폴백 허용
+        if DEV_SAML:
+            # 우선순위: user → (account@pc) → dev-user
+            user = (
+                form.get("user")
+                or form.get("email")
+                or request.query_params.get("user")
+                or request.query_params.get("email")
+            )
+            if not user:
+                account = form.get("account") or request.query_params.get("account")
+                pc = form.get("pc") or request.query_params.get("pc")
+                if account:
+                    user = f"{account}@{pc or 'unknown'}"
+                else:
+                    user = "dev-user"
+            # org_url/dev 메타도 반영
+            meta = {
+                "org_url": request.query_params.get("org_url") or form.get("org_url"),
+                "company": request.query_params.get("company") or form.get("company"),
+                "department": request.query_params.get("department") or form.get("department"),
+                "team": request.query_params.get("team") or form.get("team"),
+            }
+            meta = {k: v for k, v in meta.items() if v}
+            resp = FastAPIResponse(status_code=302)
+            resp.headers["Location"] = "/"
+            resp.set_cookie("session_user", user, max_age=7*24*3600, secure=True, httponly=True, samesite="Lax")
+            if meta:
+                try:
+                    prev = request.cookies.get("session_meta")
+                    if prev:
+                        cur = json.loads(prev)
+                        cur.update(meta)
+                        meta = cur
+                except Exception:
+                    pass
+                resp.set_cookie("session_meta", json.dumps(meta, ensure_ascii=False), max_age=7*24*3600, secure=True, httponly=False, samesite="Lax")
+            log_access_row(tag="INFO", path="/saml/acs", method="POST", status=302, note=f"DEV SAML(예외) 로그인: {user}")
+            return resp
+        return PlainTextResponse("ACS error: exception during processing", status_code=400)
+
+    if errors or not auth.is_authenticated():
+        if DEV_SAML:
+            # 개발 모드 폴백: 쿼리/폼에서 사용자 식별자 수용
+            user = (form.get("user") or form.get("email") or request.query_params.get("user")
+                    or request.query_params.get("email"))
+            if not user:
+                account = form.get("account") or request.query_params.get("account")
+                pc = form.get("pc") or request.query_params.get("pc")
+                user = f"{account}@{pc or 'unknown'}" if account else "dev-user"
+            resp = FastAPIResponse(status_code=302)
+            resp.headers["Location"] = "/"
+            resp.set_cookie("session_user", user, max_age=7*24*3600, secure=True, httponly=True, samesite="Lax")
+            log_access_row(tag="INFO", path="/saml/acs", method="POST", status=302, note=f"DEV SAML 로그인: {user}")
+            return resp
+        reason = auth.get_last_error_reason() or ""
+        return PlainTextResponse(f"ACS error: {errors or 'not_authenticated'}\n{reason}", status_code=400)
+
+    nameid = auth.get_nameid() or "saml-user"
+    # SAML Attributes에서 메타 추출 시도 (사내 호환: org_url/samlUserdata 등)
+    meta = {}
+    try:
+        attrs = auth.get_attributes() or {}
+        # 예시 매핑 - 실제 사내 속성명에 맞춰 추가 확장 가능
+        def pick(*keys):
+            for k in keys:
+                v = attrs.get(k) or attrs.get(k.upper()) or attrs.get(k.lower())
+                if isinstance(v, list):
+                    v = v[0] if v else None
+                if v:
+                    return v
+            return None
+        # 표준/사내 속성 매핑
+        meta_candidates = {
+            # 표준/일반
+            "org_url": pick("org_url", "OrgUrl", "OrganizationURL"),
+            "company": pick("company", "Company", "o", "organizationName"),
+            "department": pick("department", "Department", "departmentNumber", "ou", "DeptName"),
+            "team": pick("team", "Team"),
+            "title": pick("title", "Title", "GrdName", "GrdName_EN"),
+            "email": pick("email", "Email", "mail"),
+            # 사내 전용 필드들 보존
+            "login_id": pick("LoginId"),
+            "department_id": pick("DeptId"),
+            "employee_id": pick("Sabun"),
+            "department_name": pick("DeptName"),
+            "grade": pick("GrdName"),
+            "grade_en": pick("GrdName_EN"),
+            "username": pick("Username"),
+        }
+        meta = {k: v for k, v in meta_candidates.items() if v}
+    except Exception:
+        meta = {}
+    resp = FastAPIResponse(status_code=302)
+    resp.headers["Location"] = "/"
+    resp.set_cookie("session_user", nameid, max_age=7*24*3600, secure=True, httponly=True, samesite="Lax")
+    if meta:
+        try:
+            prev = request.cookies.get("session_meta")
+            if prev:
+                cur = json.loads(prev)
+                cur.update(meta)
+                meta = cur
+        except Exception:
+            pass
+        resp.set_cookie("session_meta", json.dumps(meta, ensure_ascii=False), max_age=7*24*3600, secure=True, httponly=False, samesite="Lax")
+    log_access_row(tag="INFO", path="/saml/acs", method="POST", status=302, note=f"SAML 로그인: {nameid}")
+    return resp
+
+@app.get("/saml/dev-login")
+async def saml_dev_login(request: Request):
+    """개발 모드 간편 로그인: ?user=이메일(또는 임의값)
+    DEV_SAML=1일 때만 허용.
+    """
+    if not DEV_SAML:
+        return PlainTextResponse("DEV_SAML 비활성화", status_code=403)
+    # 우선순위: user → (account@pc) → dev-user
+    user = request.query_params.get("user") or request.query_params.get("email")
+    account = request.query_params.get("account")
+    pc = request.query_params.get("pc")
+    company = request.query_params.get("company") or request.query_params.get("corp")
+    department = request.query_params.get("department") or request.query_params.get("dept") or request.query_params.get("DeptName")
+    team = request.query_params.get("team")
+    title = request.query_params.get("title")
+    # 사내 속성들
+    login_id = request.query_params.get("LoginId")
+    dept_id = request.query_params.get("DeptId")
+    sabun = request.query_params.get("Sabun")
+    dept_name = request.query_params.get("DeptName")
+    grd_name = request.query_params.get("GrdName")
+    grd_name_en = request.query_params.get("GrdName_EN")
+    username = request.query_params.get("Username")
+
+    if not user:
+        if account:
+            user = f"{account}@{pc or 'unknown'}"
+        else:
+            user = "dev-user"
+    # 메타데이터를 별도 쿠키에 JSON으로 저장
+    meta = {
+        "company": company,
+        "department": department or dept_name,
+        "team": team,
+        "title": title or grd_name or grd_name_en,
+        "account": account,
+        "pc": pc,
+        # 사내 보존 필드들
+        "login_id": login_id or account,
+        "department_id": dept_id,
+        "employee_id": sabun,
+        "department_name": dept_name,
+        "grade": grd_name,
+        "grade_en": grd_name_en,
+        "username": username,
+    }
+    # None 제거
+    meta = {k: v for k, v in meta.items() if v}
+
+    resp = FastAPIResponse(status_code=302)
+    resp.headers["Location"] = "/"
+    resp.set_cookie("session_user", user, max_age=7*24*3600, secure=True, httponly=True, samesite="Lax")
+    if meta:
+        resp.set_cookie("session_meta", json.dumps(meta, ensure_ascii=False), max_age=7*24*3600, secure=True, httponly=False, samesite="Lax")
+    log_access_row(tag="INFO", path="/saml/dev-login", method="GET", status=302, note=f"DEV 로그인: {user}")
+    return resp
+
+# ===== 계정 확인용 간단 API =====
+@app.get("/api/whoami")
+async def api_whoami(request: Request):
+    user = request.cookies.get("session_user") or ""
+    account = ""
+    pc = ""
+    meta = {}
+    meta_cookie = request.cookies.get("session_meta")
+    if meta_cookie:
+        try:
+            meta = json.loads(meta_cookie)
+        except Exception:
+            meta = {}
+    if user and "@" in user:
+        parts = user.split("@", 1)
+        account = parts[0]
+        pc = parts[1]
+    return {"user": user, "account": account, "pc": pc, **({"meta": meta} if meta else {})}
+
+
+# ===== 사내 ADFS/STS 헬스 체크 (핑) =====
+@app.get("/api/sso/ping")
+async def sso_ping(url: str = Query(..., description="예: http://stsds.secsso.net/adfs/ls/")):
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.netloc
+        scheme = parsed.scheme.lower()
+        path = parsed.path or "/"
+        conn = http.client.HTTPSConnection(host, timeout=3) if scheme == "https" else http.client.HTTPConnection(host, timeout=3)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        status = resp.status
+        conn.close()
+        return {"ok": status < 500, "status": status}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ---- 사용자 우선 플래그 ----
 def set_user_activity():
     global USER_ACTIVITY_FLAG, BACKGROUND_TASKS_PAUSED
@@ -355,6 +689,16 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         client_ip = logger_instance.get_client_ip(request)
+        user_cookie = request.cookies.get("session_user") or None
+        # 세션 메타(JSON) 파싱 시도
+        meta_cookie = request.cookies.get("session_meta")
+        meta_dict = None
+        if meta_cookie:
+            try:
+                meta_dict = json.loads(meta_cookie)
+            except Exception:
+                meta_dict = None
+        display_user = user_cookie or client_ip
         endpoint = str(request.url.path)
         method = request.method
         status = response.status_code
@@ -371,16 +715,23 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             tag = "API"
 
         try:
-            logger_instance._update_stats(client_ip, endpoint, method)
+            # 계정 쿠키(session_user)가 있으면 해당 사용자 기준으로 통계 집계 + 부서/팀/회사 메타
+            logger_instance._update_stats(client_ip, endpoint, method, user_id_override=user_cookie, meta=meta_dict)
         except Exception:
             pass
-        try:
-            logger_instance.log_access(request, endpoint, status, console=False)
-        except Exception:
-            pass
+        # 내부 log_access 호출은 try/except로 무시되므로, 테이블 출력은 아래 한 번만 수행
 
         note = _note_from_request(request, endpoint)
-        log_access_row(tag=tag, ip=client_ip, method=method, status=status, path=endpoint, note=note)
+        # NOTE 칼럼에 부서/팀/회사 간단 표기 (있을 때만)
+        if meta_dict:
+            bits = []
+            if meta_dict.get("company"): bits.append(meta_dict.get("company"))
+            if meta_dict.get("department"): bits.append(meta_dict.get("department"))
+            if meta_dict.get("team"): bits.append(meta_dict.get("team"))
+            if bits:
+                note = (note + " ").strip() + f"[{ ' / '.join(bits) }]"
+        # IP 칼럼에 계정(username@hostname) 우선 표시
+        log_access_row(tag=tag, ip=display_user, method=method, status=status, path=endpoint, note=note)
         return response
 
 app.add_middleware(AccessTrackingMiddleware)
@@ -977,6 +1328,19 @@ async def get_user_detail(user_id: str):
     return user_detail
 @app.get("/api/stats/active-users")
 async def get_active_users(): return logger_instance.get_active_users()
+
+# 상세 브레이크다운 제공 (회사/부서/팀/org_url)
+@app.get("/api/stats/breakdown")
+async def get_breakdown():
+    daily = logger_instance.get_daily_stats()
+    # get_daily_stats는 카운트만 제공하므로, 저장 파일을 직접 노출하지 않고
+    # 최근 집계에서 breakdown을 재구성할 수 있도록 logger_instance 내부 구조 활용
+    try:
+        # 비공개 필드 접근 대신 공개 API 조합으로는 한계가 있어 일단 users/월간 트렌드로 대체
+        monthly = logger_instance.get_monthly_trend(1)
+        return {"daily": daily, "monthly": monthly}
+    except Exception as e:
+        return {"error": str(e), "daily": daily}
 
 # ---------------- Classification ----------------
 @app.post("/api/classify")
