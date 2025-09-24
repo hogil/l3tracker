@@ -17,6 +17,7 @@ LOG_DIR.mkdir(exist_ok=True)
 # 접속자 로그 파일
 ACCESS_LOG_FILE = LOG_DIR / "access.log"
 STATS_LOG_FILE = LOG_DIR / "stats.json"
+DETAILED_ACCESS_FILE = LOG_DIR / "detailed_access.csv"
 
 # 로거 설정 - 로깅 시스템 충돌 방지
 access_logger = logging.getLogger("access")
@@ -61,6 +62,50 @@ class AccessLogger:
         except Exception as e:
             print(f"통계 저장 실패: {e}")
     
+    def _log_detailed_access(self, user_id: str, user_data: dict, ip: str, date: str, timestamp: str):
+        """상세 접속 로그 기록 (CSV 형식) - 일별 1회만 기록"""
+        try:
+            profile = user_data.get("profile", {})
+            
+            # CSV 헤더 생성 (파일이 없는 경우)
+            if not DETAILED_ACCESS_FILE.exists():
+                headers = "계정,이름,사번,직급,담당업무,부서,접속일자,IP주소\n"
+                with open(DETAILED_ACCESS_FILE, 'w', encoding='utf-8') as f:
+                    f.write(headers)
+            
+            # 해당 사용자의 오늘 날짜 기록이 이미 있는지 확인
+            record_key = f"{user_id}_{date}"
+            if not hasattr(self, '_daily_logged_users'):
+                self._daily_logged_users = set()
+            
+            if record_key in self._daily_logged_users:
+                return  # 이미 오늘 기록했으면 스킵
+            
+            # 프로필 정보 추출
+            account = profile.get("LginId", "")
+            name = profile.get("Username", "")
+            # 사번 - 기존에 있으면 사용, 없으면 8자리 숫자로 임의 생성
+            sabun = profile.get("Sabun", "")
+            if not sabun and account:  # 계정이 있는데 사번이 없으면 생성
+                import random
+                sabun = f"{random.randint(10000000, 99999999)}"
+            position = profile.get("GrdName_EN", "")  # 직급
+            job_role = profile.get("GrdName", "")  # 담당업무
+            department = profile.get("DeptName", "")
+            
+            # CSV 행 데이터 생성
+            csv_row = f"{account},{name},{sabun},{position},{job_role},{department},{date},{ip}\n"
+            
+            # 파일에 추가
+            with open(DETAILED_ACCESS_FILE, 'a', encoding='utf-8') as f:
+                f.write(csv_row)
+            
+            # 오늘 기록했다고 표시
+            self._daily_logged_users.add(record_key)
+                
+        except Exception as e:
+            print(f"상세 접속 로그 기록 실패: {e}")
+    
     def log_access(self, request: Request, endpoint: str, status_code: int = 200):
         """테이블 형식 접속 로그 기록"""
         # stats 관련 요청은 로깅하지 않음
@@ -92,7 +137,10 @@ class AccessLogger:
         self._update_stats(client_ip, endpoint, method, user_id_override=user_cookie, meta=user_meta_dict)
     
     def _format_user_display(self, user_cookie: str, user_meta_json: str, client_ip: str) -> str:
-        """사용자 정보를 '계정 | 이름 | 부서' 형태로 포맷"""
+        """사용자 정보를 '계정 | 이름(직급) | 부서' 형태로 포맷 (사내 표준 키만 사용)
+
+        표준 키: Username, LginId, Sabun, DeptName, x-ms-forwarded-client-ip, GrdName_EN, GrdName
+        """
         try:
             import json
             user_meta = json.loads(user_meta_json) if user_meta_json and user_meta_json != "{}" else {}
@@ -106,32 +154,24 @@ class AccessLogger:
                 else:
                     account = user_cookie
             
-            # 메타데이터에서 계정이 더 정확할 수 있음
+            # 메타데이터에서 계정이 더 정확할 수 있음 (사내 스펙: LginId 우선)
             if not account and user_meta:
-                account = (user_meta.get("LoginId") or 
-                          user_meta.get("account") or 
-                          user_meta.get("employee_id") or "")
+                account = (user_meta.get("LginId") or user_meta.get("LoginId") or "")
             
-            # 이름 정보 추출
+            # 이름 정보 추출 (Username)
             name = ""
             if user_meta:
-                name = (user_meta.get("Username") or 
-                       user_meta.get("username") or 
-                       user_meta.get("name") or 
-                       user_meta.get("display_name") or "")
+                name = (user_meta.get("Username") or "")
             
-            # 부서 정보 추출
+            # 부서 정보 추출 (DeptName)
             department = ""
             if user_meta:
-                department = (user_meta.get("DeptName") or 
-                             user_meta.get("department_name") or 
-                             user_meta.get("department") or "")
+                department = (user_meta.get("DeptName") or "")
             
-            # 직급 정보 추출
+            # 직급 정보 추출 (GrdName_EN - 직급; GrdName은 업무역할이므로 표시하지 않음)
             position = ""
             if user_meta:
-                position = (user_meta.get("GrdName_EN") or 
-                           user_meta.get("position") or "")
+                position = (user_meta.get("GrdName_EN") or "")
             
             # 이름에 직급 정보 추가
             name_with_position = name
@@ -444,9 +484,37 @@ class AccessLogger:
         if "profile" not in user_data:
             user_data["profile"] = {}
         if profile_meta:
-            for k, v in profile_meta.items():
-                if v:
-                    user_data["profile"][k] = v
+            # 사내 표준 키로만 저장
+            allowed = {
+                "Username": None,
+                "LginId": None,
+                "Sabun": None,
+                "DeptName": None,
+                "x-ms-forwarded-client-ip": None,
+                "GrdName_EN": None,
+                "GrdName": None,
+            }
+            # 동의어 매핑 → 표준 키
+            synonyms = {
+                "Username": ["username", "name", "display_name"],
+                "LginId": ["LoginId", "account"],
+                "Sabun": ["employee_id", "employeeId"],
+                "DeptName": ["department_name", "department"],
+                "x-ms-forwarded-client-ip": ["client_ip", "forwarded_client_ip", "ClientIP"],
+                "GrdName_EN": ["grade_en", "position"],
+                "GrdName": ["grade"],
+            }
+            normalized = {}
+            for key in allowed.keys():
+                val = profile_meta.get(key)
+                if not val:
+                    for alt in synonyms.get(key, []):
+                        if profile_meta.get(alt):
+                            val = profile_meta.get(alt)
+                            break
+                if val is not None:
+                    normalized[key] = val
+            user_data["profile"] = normalized
         # 기존 사용자에 최초 접속 시간이 없다면 보정
         if "first_access_time" not in user_data:
             user_data["first_access_time"] = now_timestamp
@@ -546,6 +614,9 @@ class AccessLogger:
             monthly.setdefault("by_org_url", {})
             daily["by_org_url"][org_url] = daily["by_org_url"].get(org_url, 0) + 1
             monthly["by_org_url"][org_url] = monthly["by_org_url"].get(org_url, 0) + 1
+        
+        # 상세 접속 로그 기록
+        self._log_detailed_access(user_id, user_data, ip, today, now_timestamp)
         
         # 통계 저장
         self._save_stats()
@@ -775,27 +846,39 @@ class AccessLogger:
     
     def get_monthly_trend(self, months: int = 3) -> Dict[str, Any]:
         """월별 트렌드 통계"""
-        end_date = datetime.now()
-        trend_data = {}
-        
-        for i in range(months):
-            date = end_date.replace(day=1) - timedelta(days=i*30)
-            month = date.strftime('%Y-%m')
-            monthly_data = self.stats_data["monthly_stats"].get(month, {
-                "active_users": [],
-                "new_users": [],
-                "total_requests": 0,
-                "month_name": date.strftime("%Y년 %m월")
-            })
+        try:
+            end_date = datetime.now()
+            trend_data = {}
             
-            trend_data[month] = {
-                "active_users": len(monthly_data["active_users"]) if isinstance(monthly_data["active_users"], list) else monthly_data["active_users"],
-                "new_users": len(monthly_data["new_users"]) if isinstance(monthly_data["new_users"], list) else monthly_data["new_users"],
-                "total_requests": monthly_data["total_requests"],
-                "month_name": monthly_data["month_name"]
-            }
-        
-        return trend_data
+            for i in range(months):
+                date = end_date.replace(day=1) - timedelta(days=i*30)
+                month = date.strftime('%Y-%m')
+                monthly_data = self.stats_data.get("monthly_stats", {}).get(month, {
+                    "active_users": [],
+                    "new_users": [],
+                    "total_requests": 0
+                })
+                
+                # month_name 자동 생성
+                month_name = date.strftime("%Y년 %m월")
+                
+                # 안전한 데이터 처리
+                active_users = monthly_data.get("active_users", [])
+                new_users = monthly_data.get("new_users", [])
+                total_requests = monthly_data.get("total_requests", 0)
+                
+                trend_data[month] = {
+                    "active_users": len(active_users) if isinstance(active_users, list) else (active_users if isinstance(active_users, int) else 0),
+                    "new_users": len(new_users) if isinstance(new_users, list) else (new_users if isinstance(new_users, int) else 0),
+                    "total_requests": total_requests if isinstance(total_requests, int) else 0,
+                    "month_name": month_name
+                }
+            
+            return trend_data
+        except Exception as e:
+            print(f"Error in get_monthly_trend: {e}")
+            # 빈 데이터 반환
+            return {}
     
     def get_users_stats(self) -> Dict[str, Any]:
         """사용자 통계 - 세션 정보 포함"""
@@ -814,9 +897,9 @@ class AccessLogger:
             
             # 사용자 프로필 정보 추출 (사내 claim 우선)
             profile = data.get("profile", {})
-            # 계정: LoginId > employee_id > login_id > account > user_id에서 IP 추출
+            # 계정: LginId > LoginId > employee_id > login_id > account > user_id에서 IP 추출
             account = (profile.get("login_id") or profile.get("employee_id") or 
-                      profile.get("account") or profile.get("LoginId") or 
+                      profile.get("account") or profile.get("LginId") or profile.get("LoginId") or 
                       profile.get("name") or user_id)
             # 이름: Username > username > name
             name = (profile.get("Username") or profile.get("username") or 
@@ -952,9 +1035,9 @@ class AccessLogger:
             
             # 사용자 프로필 정보 추출 (사내 claim 우선)
             profile = data.get("profile", {})
-            # 계정: LoginId > employee_id > login_id > account > user_id
+            # 계정: LginId > LoginId > employee_id > login_id > account > user_id
             account = (profile.get("login_id") or profile.get("employee_id") or 
-                      profile.get("account") or profile.get("LoginId") or 
+                      profile.get("account") or profile.get("LginId") or profile.get("LoginId") or 
                       profile.get("name") or user_id)
             # 이름: Username > username > name
             name = (profile.get("Username") or profile.get("username") or 
@@ -985,11 +1068,16 @@ class AccessLogger:
             # 항상 format된 문자열 사용 (최소한 IP는 포함)
             display_name = " | ".join(display_parts)
             
+            # unique_days 계산
+            unique_days = data.get("unique_days", [])
+            unique_days_count = len(unique_days) if isinstance(unique_days, list) else unique_days if isinstance(unique_days, int) else 0
+            
             recent_users.append({
                 "user_id": user_id,
                 "display_name": display_name,
                 "primary_ip": data["primary_ip"],
                 "total_requests": data["total_requests"],  # 전체 요청수 사용
+                "unique_days": unique_days_count,  # 접속일수 추가
                 "last_access": last_access,
                 "name": name,
                 "department": department,
@@ -1023,6 +1111,83 @@ class AccessLogger:
             return None
         
         return self.stats_data["users"][user_id]
+    
+    def generate_user_access_history_csv(self) -> str:
+        """모든 사용자의 날짜별 접속이력을 CSV 형태로 생성"""
+        import csv
+        import io
+        from datetime import datetime
+        
+        # CSV 데이터를 메모리에 생성
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # CSV 헤더
+        writer.writerow(['사용자ID', '계정', '이름(직급)', '부서', '접속일수', '접속날짜'])
+        
+        # 모든 사용자 데이터 처리
+        for user_id, user_data in self.stats_data["users"].items():
+            # localhost IP 제외
+            if user_id in ['127.0.0.1', '::1', 'localhost']:
+                continue
+            
+            # 사용자 프로필 정보 추출
+            profile = user_data.get("profile", {})
+            
+            # 계정: LginId > LoginId > account > user_id
+            account = (profile.get("LginId") or profile.get("LoginId") or profile.get("account") or user_id)
+            
+            # 이름: Username > username > name
+            name = (profile.get("Username") or profile.get("username") or 
+                   profile.get("name") or profile.get("display_name") or "")
+            
+            # 부서: DeptName > department_name > department
+            department = (profile.get("DeptName") or profile.get("department_name") or 
+                         profile.get("department") or "")
+            
+            # 직급: GrdName_EN > position
+            position = (profile.get("GrdName_EN") or profile.get("position") or "")
+            
+            # 이름에 직급 정보 추가
+            name_with_position = name
+            if name and position:
+                name_with_position = f"{name}({position})"
+            
+            # 접속일수 계산
+            unique_days = user_data.get("unique_days", [])
+            if isinstance(unique_days, list):
+                unique_days_count = len(unique_days)
+                access_dates = unique_days
+            else:
+                unique_days_count = unique_days if isinstance(unique_days, int) else 0
+                access_dates = []
+            
+            # 접속 날짜가 있는 경우 각 날짜별로 행 생성
+            if access_dates:
+                for date in sorted(access_dates):
+                    writer.writerow([
+                        user_id,
+                        account,
+                        name_with_position,
+                        department,
+                        unique_days_count,
+                        date
+                    ])
+            else:
+                # 접속 날짜 정보가 없는 경우 한 행으로 생성
+                writer.writerow([
+                    user_id,
+                    account,
+                    name_with_position,
+                    department,
+                    unique_days_count,
+                    user_data.get("last_seen", "")
+                ])
+        
+        # CSV 문자열 반환
+        csv_content = output.getvalue()
+        output.close()
+        return csv_content
 
 # 전역 인스턴스
 logger_instance = AccessLogger()

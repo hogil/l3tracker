@@ -18,6 +18,8 @@ L3 Tracker는 반도체 웨이퍼맵의 불량 패턴을 분석하고 관리하�
 - **📊 배치 처리**: 수천 개 이미지 동시 처리 및 관리
 - **🎯 픽셀 완벽 렌더링**: 반도체 불량 패턴의 세밀한 부분까지 보존
 - **💾 효율적인 캐싱**: 썸네일 및 이미지 데이터 스마트 캐싱
+- **📊 상세 접속 로그**: SAML 연동 사용자 추적 및 일별 접속 기록 CSV 내보내기
+- **🔐 SAML 인증**: 회사 SSO 연동 및 사용자 프로필 관리
 
 ## 🚀 빠른 시작
 
@@ -151,6 +153,32 @@ not scratch
 (wafer or chip) and not random
 ```
 
+### 5. 상세 접속 로그 시스템
+
+SAML 인증과 연동된 사용자 접속 추적 및 분석:
+
+**주요 기능:**
+- 실시간 사용자 접속 기록
+- SAML 클레임 기반 프로필 관리 (계정, 이름, 사번, 직급, 담당업무, 부서)
+- 일별 접속 통계 및 CSV 내보내기
+- UTF-8 BOM 지원으로 한글 완벽 호환
+
+**CSV 내보내기 형식:**
+```csv
+계정,이름,사번,직급,담당업무,부서,접속일자,IP주소
+hgchoi,최홍길,95722448,Senior Engineer,선임연구원,반도체사업부,2025-09-24,61.82.130.250
+manager,김팀장,89500230,Manager,팀장,품질관리팀,2025-09-24,192.168.1.101
+```
+
+**SAML 클레임 매핑:**
+- `Username` → 이름
+- `LginId` → 계정  
+- `Sabun` → 사번 (8자리 자동생성)
+- `GrdName_EN` → 직급
+- `GrdName` → 담당업무
+- `DeptName` → 부서명
+- `x-ms-forwarded-client-ip` → IP주소
+
 ## 🛠️ API 엔드포인트
 
 | 엔드포인트 | 메소드 | 설명 |
@@ -161,6 +189,10 @@ not scratch
 | `/api/classify` | POST | AI 분류 실행 |
 | `/api/labels` | GET/POST | 라벨 관리 |
 | `/api/search` | GET | 파일 검색 |
+| `/api/stats/*` | GET | 접속 통계 조회 |
+| `/api/export/detailed-access` | GET | 상세 접속 로그 CSV 다운로드 |
+| `/saml/acs` | POST | SAML 인증 처리 |
+| `/stats` | GET | 접속 통계 대시보드 |
 
 ## 📈 성능 최적화
 

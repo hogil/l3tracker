@@ -4,6 +4,33 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.0.0/)를 따르며,
 버전 관리는 [Semantic Versioning](https://semver.org/lang/ko/)을 준수합니다.
 
+## [2.2.0] - 2025-09-24
+
+### ✨ 추가/변경
+- **상세 접속 로그 시스템**
+  - SAML 클레임 기반 사용자 프로필 관리 (7개 표준 키)
+  - 일별 접속 기록 자동 생성 및 CSV 내보내기 기능
+  - UTF-8 BOM 지원으로 Excel에서 한글 완벽 표시
+  - 8자리 사번 자동 생성 기능
+- **API 엔드포인트**
+  - `/api/export/detailed-access`: 상세 접속 로그 CSV 다운로드
+  - `/api/stats/*`: 접속 통계 조회 API 확장
+- **UI/UX 개선**
+  - 통계 페이지 버튼 레이아웃 최적화
+  - 파일 다운로드 시 화면 깜빡임 방지
+
+### 🔧 기술적 개선
+- **프로필 데이터 정리**: 기존 stats.json에서 1,050개 불필요한 키 제거
+- **실시간 로깅**: 중복 방지 로직으로 일별 1회만 기록
+- **인코딩 최적화**: UTF-8 BOM 추가로 다국어 지원 강화
+
+### 📊 SAML 클레임 표준화
+- `Username` (이름), `LginId` (계정), `Sabun` (사번)
+- `GrdName_EN` (직급), `GrdName` (담당업무), `DeptName` (부서)
+- `x-ms-forwarded-client-ip` (IP주소)
+
+---
+
 ## [2.1.0] - 2025-09-23
 
 ### ✨ 추가/변경

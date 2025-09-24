@@ -4514,12 +4514,23 @@ class WaferMapViewer {
         // --- 우클릭으로 Label Explorer만 선택 해제 ---
         container.oncontextmenu = (e) => {
             e.preventDefault();
+            // 선택 상태 초기화
             labelSelection.selected = [];
             labelSelection.selectedClasses = [];
             this.updateLabelExplorerSelection();
-            // 단일 이미지가 표시 중이면 숨겨 Wafer Map Explorer와 일관 동작
+
+            // 그리드 모드였다면 종료하고 초기 화면으로 복귀
+            if (this.gridMode) {
+                this.hideGrid();
+                this.showInitialState();
+                console.log('Label Explorer: 우클릭 → 그리드 종료 및 초기화면 복귀');
+                return;
+            }
+
+            // 단일 이미지 모드였다면 이미지 숨기고 초기 화면으로 복귀
             this.hideImage();
-            console.log('Label Explorer: 우클릭 → 선택 해제 및 이미지 숨김');
+            this.showInitialState();
+            console.log('Label Explorer: 우클릭 → 단일 이미지 숨김 및 초기화면 복귀');
         };
         
         // --- 키보드 단축키 (Label Explorer 전용) ---
@@ -4543,11 +4554,20 @@ class WaferMapViewer {
             frame.oncontextmenu = (e) => {
                 if (e.target === frame) {
                     e.preventDefault();
+                    // 선택 초기화
                     labelSelection.selected = [];
                     labelSelection.selectedClasses = [];
                     this.updateLabelExplorerSelection();
+
+                    if (this.gridMode) {
+                        this.hideGrid();
+                        this.showInitialState();
+                        console.log('Label Explorer 프레임: 우클릭 → 그리드 종료 및 초기화면 복귀');
+                        return;
+                    }
                     this.hideImage();
-                    console.log('Label Explorer 프레임: 우클릭 → 선택 해제 및 이미지 숨김');
+                    this.showInitialState();
+                    console.log('Label Explorer 프레임: 우클릭 → 단일 이미지 숨김 및 초기화면 복귀');
                 }
             };
         }

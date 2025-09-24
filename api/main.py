@@ -519,30 +519,17 @@ async def saml_acs(request: Request):
                     return v
             return None
         # 표준/사내 속성 매핑
-        meta_candidates = {
-            # 표준/일반
-            "org_url": pick("org_url", "OrgUrl", "OrganizationURL"),
-            "company": pick("company", "Company", "o", "organizationName"),
-            "department": pick("department", "Department", "departmentNumber", "ou", "DeptName"),
-            "team": pick("team", "Team"),
-            "title": pick("title", "Title", "GrdName", "GrdName_EN"),
-            "email": pick("email", "Email", "mail"),
-            "name": pick("name", "Name", "displayName", "cn", "Username"),
-            # 사내 전용 필드들 (정확한 claim명 매핑)
-            "login_id": pick("LoginId", "LginId"),  # LginId는 오타일 수 있지만 지원 (계정)
-            "department_id": pick("DeptId"),
-            "employee_id": pick("employeeId", "Sabun"),  # Sabun = 사번
-            "department_name": pick("DeptName"),  # DeptName = 부서명
-            "grade": pick("GrdName"),  # GrdName = 담당업무
-            "grade_en": pick("GrdName_EN"),  # GrdName_EN = 직급
-            "username": pick("Username"),  # Username = 이름 (필수)
-            # Username을 기본 name 필드로도 사용
-            "display_name": pick("Username", "name", "Name", "displayName", "cn"),
-            # MS Azure AD 관련 필드들
-            "client_ip": pick("x-ms-forwarded-client-ip", "X-MS-Forwarded-Client-IP", "ClientIP"),
-            "forwarded_client_ip": pick("x-ms-forwarded-client-ip", "X-MS-Forwarded-Client-IP"),
+        # 사내 표준 프로필 키만 추출
+        profile_only = {
+            "Username": pick("Username"),
+            "LginId": pick("LginId", "LoginId"),
+            "Sabun": pick("Sabun", "employeeId"),
+            "DeptName": pick("DeptName"),
+            "x-ms-forwarded-client-ip": pick("x-ms-forwarded-client-ip", "X-MS-Forwarded-Client-IP", "ClientIP"),
+            "GrdName_EN": pick("GrdName_EN"),
+            "GrdName": pick("GrdName"),
         }
-        meta = {k: v for k, v in meta_candidates.items() if v}
+        meta = {k: v for k, v in profile_only.items() if v}
     except Exception:
         meta = {}
     resp = FastAPIResponse(status_code=302)
@@ -577,7 +564,7 @@ async def saml_dev_login(request: Request):
     team = request.query_params.get("team")
     title = request.query_params.get("title")
     # 사내 속성들 (정확한 claim명)
-    login_id = request.query_params.get("LoginId") or request.query_params.get("LginId")  # 계정
+    login_id = request.query_params.get("LginId") or request.query_params.get("LoginId")  # 계정
     dept_id = request.query_params.get("DeptId")
     sabun = request.query_params.get("Sabun")  # 사번
     dept_name = request.query_params.get("DeptName")  # 부서명
@@ -592,29 +579,17 @@ async def saml_dev_login(request: Request):
         else:
             user = "dev-user"
     # 메타데이터를 별도 쿠키에 JSON으로 저장
+    # 사내 표준 프로필만 보존
     meta = {
-        "company": company,
-        "department": department or dept_name,  # DeptName 우선 사용
-        "team": team,
-        "title": title or grd_name or grd_name_en,
-        "account": account,
-        "pc": pc,
-        "name": username,  # Username = 이름 (필수)
-        "email": user if "@" in user else None,
-        # 사내 보존 필드들 (정확한 claim명 매핑)
-        "login_id": login_id or account,  # LoginId/LginId = 계정
-        "department_id": dept_id,
-        "employee_id": sabun,  # Sabun = 사번
-        "department_name": dept_name,  # DeptName = 부서명
-        "grade": grd_name,  # GrdName = 담당업무
-        "grade_en": grd_name_en,  # GrdName_EN = 직급
-        "username": username,  # Username = 이름
-        "display_name": username,  # Username을 display_name으로도 사용
-        "client_ip": client_ip,  # x-ms-forwarded-client-ip
-        "forwarded_client_ip": client_ip,
+        "Username": username,
+        "LginId": login_id or account,
+        "Sabun": sabun,
+        "DeptName": dept_name or department,
+        "x-ms-forwarded-client-ip": client_ip,
+        "GrdName_EN": grd_name_en,
+        "GrdName": grd_name,
     }
-    # None 제거
-    meta = {k: v for k, v in meta.items() if v}
+    meta = {k: v for k, v in meta.items() if v is not None}
 
     resp = FastAPIResponse(status_code=302)
     resp.headers["Location"] = "/"
@@ -726,14 +701,14 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         display_user = user_cookie or client_ip
         if meta_dict:
             # 사내 claim 매핑
-            name = (meta_dict.get('username') or meta_dict.get('Username') or 
+            name = (meta_dict.get('Username') or meta_dict.get('username') or 
                    meta_dict.get('display_name') or meta_dict.get('name'))
-            dept = (meta_dict.get('department_name') or meta_dict.get('DeptName') or 
+            dept = (meta_dict.get('DeptName') or meta_dict.get('department_name') or 
                    meta_dict.get('department'))
-            login_id = meta_dict.get('login_id') or meta_dict.get('LoginId')
+            login_id = meta_dict.get('login_id') or meta_dict.get('LginId') or meta_dict.get('LoginId')
             
             parts = []
-            # 계정 표시 (LoginId가 있으면 우선, 없으면 user_cookie)
+            # 계정 표시 (LginId 우선, 없으면 LoginId, 없으면 user_cookie)
             if login_id and login_id != user_cookie:
                 parts.append(login_id)
             elif user_cookie:
@@ -1407,6 +1382,36 @@ async def reload_stats():
     except Exception as e:
         logger.error(f"통계 데이터 재로드 실패: {e}")
         return {"error": str(e)}
+
+@app.get("/api/export/detailed-access")
+async def export_detailed_access():
+    """상세 접속 로그 CSV 파일 다운로드 (UTF-8 BOM 포함)"""
+    from fastapi.responses import Response
+    from pathlib import Path
+    
+    detailed_file = Path("logs/detailed_access.csv")
+    
+    if not detailed_file.exists():
+        return {"error": "상세 접속 로그 파일이 존재하지 않습니다."}
+    
+    # UTF-8 BOM을 추가하여 Excel에서 한글 제대로 표시
+    try:
+        with open(detailed_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # UTF-8 BOM 추가
+        bom_content = '\ufeff' + content
+        
+        return Response(
+            content=bom_content.encode('utf-8'),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": "attachment; filename=detailed_access_log.csv",
+                "Content-Type": "text/csv; charset=utf-8"
+            }
+        )
+    except Exception as e:
+        return {"error": f"파일 읽기 실패: {str(e)}"}
 
 # ---------------- Classification ----------------
 @app.post("/api/classify")

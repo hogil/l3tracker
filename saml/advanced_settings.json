@@ -1,9 +1,35 @@
 {
   "security": {
+    "nameIdEncrypted": false,
     "authnRequestsSigned": false,
-    "wantAssertionsSigned": false,
+    "logoutRequestSigned": false,
+    "logoutResponseSigned": false,
+    "signMetadata": false,
     "wantMessagesSigned": false,
-    "wantAssertionsEncrypted": false
+    "wantAssertionsSigned": false,
+    "wantNameId": true,
+    "wantNameIdEncrypted": false,
+    "wantAssertionsEncrypted": false,
+    "requestedAuthnContext": true,
+    "signatureAlgorithm": "http://www.w3.org/2000/09/xmldsig#rsa-sha1",
+    "digestAlgorithm": "http://www.w3.org/2000/09/xmldsig#sha1"
+  },
+  "contactPerson": {
+    "technical": {
+      "givenName": "Technical Support",
+      "emailAddress": "tech@company.com"
+    },
+    "support": {
+      "givenName": "Support Team",
+      "emailAddress": "support@company.com"
+    }
+  },
+  "organization": {
+    "en-US": {
+      "name": "Company Name",
+      "displayname": "Company Display Name",
+      "url": "https://company.com"
+    }
   }
 }
 

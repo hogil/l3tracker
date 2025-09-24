@@ -16,7 +16,10 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(curl:*)",
-      "Bash(start chrome https://localhost:8443/stats)"
+      "Bash(start chrome https://localhost:8443/stats)",
+      "Bash(dir)",
+      "Bash(start chrome https://localhost:8444/stats)",
+      "Bash(del logsdetailed_access.csv)"
     ],
     "deny": [],
     "ask": []
