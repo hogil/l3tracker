@@ -127,11 +127,22 @@ class AccessLogger:
                              user_meta.get("department_name") or 
                              user_meta.get("department") or "")
             
+            # 직급 정보 추출
+            position = ""
+            if user_meta:
+                position = (user_meta.get("GrdName_EN") or 
+                           user_meta.get("position") or "")
+            
+            # 이름에 직급 정보 추가
+            name_with_position = name
+            if name and position:
+                name_with_position = f"{name}({position})"
+            
             # 형태별 표시 우선순위
-            if account and name and department:
-                return f"{account} | {name} | {department}"
-            elif account and name:
-                return f"{account} | {name}"
+            if account and name_with_position and department:
+                return f"{account} | {name_with_position} | {department}"
+            elif account and name_with_position:
+                return f"{account} | {name_with_position}"
             elif account:
                 return account
             else:
@@ -815,14 +826,17 @@ class AccessLogger:
             # 직급: GrdName_EN > position
             position = (profile.get("GrdName_EN") or profile.get("position", ""))
             
-            # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
+            # 디스플레이명 구성: "계정 | 이름(직급) | 부서 | IP"
             display_parts = []
             # 계정 정보가 있으면 추가
             if account and account != user_id:
                 display_parts.append(account)
-            # 이름 정보가 있으면 추가
+            # 이름 정보가 있으면 추가 (직급 포함)
             if name and name != account:
-                display_parts.append(name)
+                name_with_position = name
+                if position:
+                    name_with_position = f"{name}({position})"
+                display_parts.append(name_with_position)
             # 부서 정보가 있으면 추가
             if department:
                 display_parts.append(department)
@@ -906,14 +920,17 @@ class AccessLogger:
                 # 직급: GrdName_EN > position
                 position = (profile.get("GrdName_EN") or profile.get("position", ""))
                 
-                # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
+                # 디스플레이명 구성: "계정 | 이름(직급) | 부서 | IP"
                 display_parts = []
                 # 계정 정보가 있으면 추가
                 if account and account != user_id:
                     display_parts.append(account)
-                # 이름 정보가 있으면 추가
+                # 이름 정보가 있으면 추가 (직급 포함)
                 if name and name != account:
-                    display_parts.append(name)
+                    name_with_position = name
+                    if position:
+                        name_with_position = f"{name}({position})"
+                    display_parts.append(name_with_position)
                 # 부서 정보가 있으면 추가
                 if department:
                     display_parts.append(department)
