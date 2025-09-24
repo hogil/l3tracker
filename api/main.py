@@ -1365,16 +1365,11 @@ async def get_active_users(): return logger_instance.get_active_users()
 
 # 상세 브레이크다운 제공 (회사/부서/팀/org_url)
 @app.get("/api/stats/breakdown")
-async def get_breakdown():
-    daily = logger_instance.get_daily_stats()
-    # get_daily_stats는 카운트만 제공하므로, 저장 파일을 직접 노출하지 않고
-    # 최근 집계에서 breakdown을 재구성할 수 있도록 logger_instance 내부 구조 활용
+async def get_breakdown(category: str = Query("department"), days: int = Query(7, ge=1, le=30)):
     try:
-        # 비공개 필드 접근 대신 공개 API 조합으로는 한계가 있어 일단 users/월간 트렌드로 대체
-        monthly = logger_instance.get_monthly_trend(1)
-        return {"daily": daily, "monthly": monthly}
+        return logger_instance.get_breakdown_stats(category, days)
     except Exception as e:
-        return {"error": str(e), "daily": daily}
+        return {"error": str(e)}
 
 # ---------------- Classification ----------------
 @app.post("/api/classify")

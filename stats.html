@@ -408,12 +408,13 @@
         async function loadStats() {
             try {
                 // 병렬로 모든 데이터 로드
-                const [dailyResponse, trendResponse, monthlyResponse, usersResponse, recentUsersResponse] = await Promise.all([
+                const [dailyResponse, trendResponse, monthlyResponse, usersResponse, recentUsersResponse, deptResponse] = await Promise.all([
                     fetch('/api/stats/daily'),
                     fetch('/api/stats/trend?days=14'),
                     fetch('/api/stats/monthly?months=6'),
                     fetch('/api/stats/users'),
-                    fetch('/api/stats/recent-users')
+                    fetch('/api/stats/recent-users'),
+                    fetch('/api/stats/breakdown?category=department&days=14')
                 ]);
                 
                 const dailyData = await dailyResponse.json();
@@ -421,6 +422,7 @@
                 monthlyData = await monthlyResponse.json();
                 const usersData = await usersResponse.json();
                 const recentUsersData = await recentUsersResponse.json();
+                const deptData = await deptResponse.json();
                 
                 renderDailyStats(dailyData);
                 renderUserTable(usersData.users);
@@ -429,6 +431,7 @@
                 // 두 차트 모두 렌더링
                 renderDailyChart();
                 renderMonthlyChart();
+                renderDeptBreakdown(deptData);
                 
                 document.getElementById('totalUsers').textContent = usersData.total_users;
                 document.getElementById('recentUsersCount').textContent = recentUsersData.total_recent;
@@ -437,6 +440,19 @@
                 console.error('통계 로드 실패:', error);
                 showError('통계 로드에 실패했습니다.');
             }
+        }
+
+        function renderDeptBreakdown(data) {
+            if (!data || !Array.isArray(data.items)) return;
+            const container = document.getElementById('dailyStats');
+            const top = data.items.slice(0, 4);
+            const html = top.map(([dept, cnt]) => `
+                <div class="stat-card">
+                    <div class="stat-value">${cnt}</div>
+                    <div class="stat-label">부서: ${dept}</div>
+                </div>
+            `).join('');
+            container.insertAdjacentHTML('beforeend', html);
         }
         
         function renderDailyStats(data) {

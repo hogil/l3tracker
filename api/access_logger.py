@@ -316,7 +316,7 @@ class AccessLogger:
             except Exception:
                 pass
         if meta and isinstance(meta, dict):
-            for k in ("company", "department", "team", "title", "email", "account", "pc"):
+            for k in ("company", "department", "team", "title", "email", "account", "pc", "name"):
                 v = meta.get(k)
                 if v:
                     profile_meta[k] = v
@@ -758,6 +758,24 @@ class AccessLogger:
             "total_users": len(users),
             "users": users[:50]  # 상위 50명
         }
+
+    def get_breakdown_stats(self, category: str = "department", days: int = 7) -> Dict[str, Any]:
+        """부서/팀/회사/org_url 별 집계
+        category: department|team|company|org_url
+        """
+        end_date = datetime.now()
+        counts: Dict[str, int] = {}
+        for i in range(days):
+            date = (end_date - timedelta(days=i)).strftime('%Y-%m-%d')
+            daily = self.stats_data["daily_stats"].get(date)
+            if not daily: continue
+            key = f"by_{category}"
+            bucket = daily.get(key, {})
+            for k, v in bucket.items():
+                counts[k] = counts.get(k, 0) + int(v)
+        # 상위 50만 반환
+        items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:50]
+        return {"category": category, "days": days, "items": items}
     
     def get_recent_users(self) -> Dict[str, Any]:
         """최근 24시간 활성 사용자"""
