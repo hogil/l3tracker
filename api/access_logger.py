@@ -812,6 +812,8 @@ class AccessLogger:
             # 부서: DeptName > department_name > department
             department = (profile.get("DeptName") or profile.get("department_name") or 
                          profile.get("department", ""))
+            # 직급: GrdName_EN > position
+            position = (profile.get("GrdName_EN") or profile.get("position", ""))
             
             # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
             display_parts = []
@@ -840,6 +842,7 @@ class AccessLogger:
                 "last_access_time": data.get("last_access_time", data["last_seen"]),
                 "name": name,
                 "department": department,
+                "position": position,
                 "session_count": data.get("session_count", 0),
                 "total_session_time": data.get("total_session_time", 0),
                 "avg_session_time": round(data.get("total_session_time", 0) / max(data.get("session_count", 1), 1), 1),
@@ -900,6 +903,8 @@ class AccessLogger:
                 # 부서: DeptName > department_name > department
                 department = (profile.get("DeptName") or profile.get("department_name") or 
                              profile.get("department", ""))
+                # 직급: GrdName_EN > position
+                position = (profile.get("GrdName_EN") or profile.get("position", ""))
                 
                 # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
                 display_parts = []
@@ -925,7 +930,8 @@ class AccessLogger:
                     "total_requests": data.get("daily_requests", {}).get(today, 0),
                     "last_access": last_access,
                     "name": name,
-                    "department": department
+                    "department": department,
+                    "position": position
                 })
         
         # 마지막 접속 시간으로 정렬 (최신 순, 안정 정렬)
