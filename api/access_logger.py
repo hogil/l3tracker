@@ -885,7 +885,7 @@ class AccessLogger:
         }
 
     def get_breakdown_stats(self, category: str = "department", days: int = 7) -> Dict[str, Any]:
-        """부서/팀/회사/org_url 별 집계
+        """부서/팀/회사/org_url 별 집계 (요청수 기준)
         category: department|team|company|org_url
         """
         end_date = datetime.now()
@@ -901,6 +901,42 @@ class AccessLogger:
         # 상위 50만 반환
         items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:50]
         return {"category": category, "days": days, "items": items}
+    
+    def get_breakdown_user_stats(self, category: str = "department") -> Dict[str, Any]:
+        """부서/팀/회사/org_url 별 누적 접속자수 집계
+        category: department|team|company|org_url
+        """
+        counts: Dict[str, int] = {}
+        
+        # 모든 사용자를 순회하면서 부서별 접속자수 계산
+        for user_id, data in self.stats_data["users"].items():
+            # localhost IP 제외
+            if user_id in ['127.0.0.1', '::1', 'localhost']:
+                continue
+                
+            profile = data.get("profile", {})
+            
+            # 카테고리별 값 추출
+            if category == "department":
+                value = (profile.get("DeptName") or 
+                        profile.get("department_name") or 
+                        profile.get("department") or "미분류")
+            elif category == "team":
+                value = (profile.get("team") or 
+                        profile.get("TeamName") or "미분류")
+            elif category == "company":
+                value = (profile.get("company") or 
+                        profile.get("CompanyName") or "미분류")
+            elif category == "org_url":
+                value = (profile.get("org_url") or "미분류")
+            else:
+                value = "미분류"
+            
+            counts[value] = counts.get(value, 0) + 1
+        
+        # 상위 50만 반환
+        items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:50]
+        return {"category": category, "type": "users", "items": items}
     
     def get_recent_users(self) -> Dict[str, Any]:
         """모든 사용자 (마지막 접속순 내림차순)"""

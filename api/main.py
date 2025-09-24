@@ -1390,6 +1390,14 @@ async def get_breakdown(category: str = Query("department"), days: int = Query(7
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/stats/breakdown-users")
+async def get_breakdown_users(category: str = Query("department")):
+    """부서/팀/회사별 누적 접속자수 통계"""
+    try:
+        return logger_instance.get_breakdown_user_stats(category)
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/api/stats/reload")
 async def reload_stats():
     """통계 데이터 강제 재로드 (개발/테스트용)"""
