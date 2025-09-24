@@ -1390,6 +1390,16 @@ async def get_breakdown(category: str = Query("department"), days: int = Query(7
     except Exception as e:
         return {"error": str(e)}
 
+@app.post("/api/stats/reload")
+async def reload_stats():
+    """통계 데이터 강제 재로드 (개발/테스트용)"""
+    try:
+        logger_instance._load_stats()
+        return {"status": "success", "message": "통계 데이터가 재로드되었습니다."}
+    except Exception as e:
+        logger.error(f"통계 데이터 재로드 실패: {e}")
+        return {"error": str(e)}
+
 # ---------------- Classification ----------------
 @app.post("/api/classify")
 async def classify_images(request: ClassifyRequest, _=Depends(labels_classes_sync_dep)):

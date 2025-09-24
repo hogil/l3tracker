@@ -69,18 +69,76 @@ class AccessLogger:
             
         client_ip = self.get_client_ip(request)
         user_cookie = request.cookies.get("session_user") or None
-        display_user = user_cookie or client_ip
+        user_meta = request.cookies.get("session_meta") or "{}"
+        
+        # 사용자 정보 추출 (계정 | 이름 | 부서)
+        display_user = self._format_user_display(user_cookie, user_meta, client_ip)
+        
         method = request.method
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # 추가 정보 추출
         extra_info = self._extract_extra_info(request, endpoint, method)
         
-        # 테이블 형식 로그 생성 (계정 우선 표시)
+        # 테이블 형식 로그 생성 (사용자 정보 표시)
         self._log_table_format(timestamp, display_user, method, endpoint, status_code, extra_info)
         
         # 통계 업데이트 (계정 기준 우선)
-        self._update_stats(client_ip, endpoint, method, user_id_override=user_cookie)
+        import json
+        try:
+            user_meta_dict = json.loads(user_meta) if user_meta and user_meta != "{}" else {}
+        except:
+            user_meta_dict = {}
+        self._update_stats(client_ip, endpoint, method, user_id_override=user_cookie, meta=user_meta_dict)
+    
+    def _format_user_display(self, user_cookie: str, user_meta_json: str, client_ip: str) -> str:
+        """사용자 정보를 '계정 | 이름 | 부서' 형태로 포맷"""
+        try:
+            import json
+            user_meta = json.loads(user_meta_json) if user_meta_json and user_meta_json != "{}" else {}
+            
+            # 계정 정보 추출
+            account = ""
+            if user_cookie:
+                # user_cookie가 "account@pc" 형태인 경우
+                if "@" in user_cookie:
+                    account = user_cookie.split("@")[0]
+                else:
+                    account = user_cookie
+            
+            # 메타데이터에서 계정이 더 정확할 수 있음
+            if not account and user_meta:
+                account = (user_meta.get("LoginId") or 
+                          user_meta.get("account") or 
+                          user_meta.get("employee_id") or "")
+            
+            # 이름 정보 추출
+            name = ""
+            if user_meta:
+                name = (user_meta.get("Username") or 
+                       user_meta.get("username") or 
+                       user_meta.get("name") or 
+                       user_meta.get("display_name") or "")
+            
+            # 부서 정보 추출
+            department = ""
+            if user_meta:
+                department = (user_meta.get("DeptName") or 
+                             user_meta.get("department_name") or 
+                             user_meta.get("department") or "")
+            
+            # 형태별 표시 우선순위
+            if account and name and department:
+                return f"{account} | {name} | {department}"
+            elif account and name:
+                return f"{account} | {name}"
+            elif account:
+                return account
+            else:
+                return client_ip
+                
+        except Exception:
+            return user_cookie or client_ip
     
     def _extract_extra_info(self, request: Request, endpoint: str, method: str) -> str:
         """요청에서 파일명, 클래스명 등 추가 정보 추출"""
@@ -171,7 +229,7 @@ class AccessLogger:
         # 완벽한 테이블 정렬 - 모든 컬럼 고정 너비
         log_type = f"{log_type_name:<3}"     # 3자리 (API, PAGE, FILE 등)
         timestamp_col = f"{timestamp:<19}"   # 19자리 (YYYY-MM-DD HH:MM:SS)
-        ip_col = f"{ip:<15}"                # 15자리
+        user_col = f"{ip:<30}"              # 30자리 (계정 | 이름 | 부서)
         method_col = f"{method:<4}"          # 4자리 (GET, POST, PUT, DEL)
         
         # 상위폴더+파일명 추출 (예: files→folder/image.png)
@@ -222,21 +280,21 @@ class AccessLogger:
         # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 정확히 계산
         # 색상 코드 길이: \033[XXm = 5자리, \033[0m = 4자리
         type_with_color = f"{type_color}{log_type}\033[0m"
-        ip_with_color = f"\033[90m{ip_col}\033[0m"
+        user_with_color = f"\033[90m{user_col}\033[0m"
         method_with_color = f"{method_color}{method_col}\033[0m"
         status_with_color = f"{status_color}{status_col}\033[0m"
         
         # 🎯 완벽한 테이블 정렬 - 색상 코드 길이 보정
         # 실제 텍스트 길이만 고려하여 정렬 (색상 코드는 무시)
         type_padded = f"{type_with_color:<8}"   # API(3) + 색상코드(9) = 8자리
-        ip_padded = f"{ip_with_color:<20}"      # IP(15) + 색상코드(9) = 20자리  
+        user_padded = f"{user_with_color:<35}"  # 사용자정보(30) + 색상코드(9) = 35자리  
         method_padded = f"{method_with_color:<8}"  # GET(3) + 색상코드(9) = 8자리
         status_padded = f"{status_with_color:>6}"  # 200(3) + 색상코드(9) = 6자리 (우측정렬)
         
         # 🎯 완벽한 정렬 - 모든 컬럼이 고정 위치에
         message = (
             f"{type_padded}  {timestamp_col}  "  # 타입-시간 간 여백 2칸
-            f"{ip_padded}  {method_padded}  "    # IP-메서드 간 여백 2칸
+            f"{user_padded}  {method_padded}  "  # 사용자-메서드 간 여백 2칸
             f"{endpoint_col}  {status_padded}{extra_part}"  # 엔드포인트-상태 간 여백 2칸
         )
         
@@ -675,9 +733,9 @@ class AccessLogger:
         
         return {
             "total_users": len(self.stats_data["users"]),
-            "active_today": len(today_data["active_users"]),
+            "active_today": len(today_data["active_users"]) if isinstance(today_data["active_users"], list) else today_data["active_users"],
             "currently_active": active_users_info["total_active"],
-            "new_users_today": len(today_data["new_users"]),
+            "new_users_today": len(today_data["new_users"]) if isinstance(today_data["new_users"], list) else today_data["new_users"],
             "total_requests_today": today_data["total_requests"],
             "active_users_detail": active_users_info["active_users"][:10]  # 상위 10명
         }
@@ -696,8 +754,8 @@ class AccessLogger:
             })
             
             trend_data[date] = {
-                "active_users": len(daily_data["active_users"]),
-                "new_users": len(daily_data["new_users"]),
+                "active_users": len(daily_data["active_users"]) if isinstance(daily_data["active_users"], list) else daily_data["active_users"],
+                "new_users": len(daily_data["new_users"]) if isinstance(daily_data["new_users"], list) else daily_data["new_users"],
                 "total_requests": daily_data["total_requests"]
             }
         
@@ -719,8 +777,8 @@ class AccessLogger:
             })
             
             trend_data[month] = {
-                "active_users": len(monthly_data["active_users"]),
-                "new_users": len(monthly_data["new_users"]),
+                "active_users": len(monthly_data["active_users"]) if isinstance(monthly_data["active_users"], list) else monthly_data["active_users"],
+                "new_users": len(monthly_data["new_users"]) if isinstance(monthly_data["new_users"], list) else monthly_data["new_users"],
                 "total_requests": monthly_data["total_requests"],
                 "month_name": monthly_data["month_name"]
             }
