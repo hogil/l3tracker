@@ -316,7 +316,14 @@ class AccessLogger:
             except Exception:
                 pass
         if meta and isinstance(meta, dict):
+            # 기본 필드들
             for k in ("company", "department", "team", "title", "email", "account", "pc", "name"):
+                v = meta.get(k)
+                if v:
+                    profile_meta[k] = v
+            # 사내 전용 필드들 추가
+            for k in ("login_id", "department_id", "employee_id", "department_name", "grade", "grade_en", 
+                     "username", "display_name", "client_ip", "forwarded_client_ip"):
                 v = meta.get(k)
                 if v:
                     profile_meta[k] = v
@@ -735,14 +742,44 @@ class AccessLogger:
                 session = self.active_sessions[user_id]
                 current_session_duration = int(now_unix - session["start_time"])
             
+            # 사용자 프로필 정보 추출 (사내 claim 우선)
+            profile = data.get("profile", {})
+            # 계정: LoginId > employee_id > login_id > account > user_id
+            account = (profile.get("login_id") or profile.get("employee_id") or 
+                      profile.get("account") or profile.get("name") or user_id)
+            # 이름: Username > username > name
+            name = profile.get("username") or profile.get("name", "")
+            # 부서: DeptName > department_name > department
+            department = (profile.get("department_name") or 
+                         profile.get("department", ""))
+            
+            # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
+            display_parts = []
+            # 계정 정보가 있으면 추가
+            if account and account != user_id:
+                display_parts.append(account)
+            # 이름 정보가 있으면 추가
+            if name and name != account:
+                display_parts.append(name)
+            # 부서 정보가 있으면 추가
+            if department:
+                display_parts.append(department)
+            # 항상 IP 추가
+            display_parts.append(data["primary_ip"])
+            
+            # 항상 format된 문자열 사용 (최소한 IP는 포함)
+            display_name = " | ".join(display_parts)
+            
             users.append({
                 "user_id": user_id,
-                "display_name": user_id,
+                "display_name": display_name,
                 "primary_ip": data["primary_ip"],
                 "total_requests": data["total_requests"],
                 "unique_days": len(data["unique_days"]),
                 "last_seen": data["last_seen"],
                 "last_access_time": data.get("last_access_time", data["last_seen"]),
+                "name": name,
+                "department": department,
                 "session_count": data.get("session_count", 0),
                 "total_session_time": data.get("total_session_time", 0),
                 "avg_session_time": round(data.get("total_session_time", 0) / max(data.get("session_count", 1), 1), 1),
@@ -791,16 +828,59 @@ class AccessLogger:
                 # 실제 저장된 마지막 접속 시간 사용
                 last_access = data.get("last_access_time", data["last_seen"])
                 
+                # 사용자 프로필 정보 추출 (사내 claim 우선)
+                profile = data.get("profile", {})
+                # 계정: LoginId > employee_id > login_id > account > user_id
+                account = (profile.get("login_id") or profile.get("employee_id") or 
+                          profile.get("account") or profile.get("name") or user_id)
+                # 이름: Username > username > name
+                name = profile.get("username") or profile.get("name", "")
+                # 부서: DeptName > department_name > department
+                department = (profile.get("department_name") or 
+                             profile.get("department", ""))
+                
+                # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
+                display_parts = []
+                # 계정 정보가 있으면 추가
+                if account and account != user_id:
+                    display_parts.append(account)
+                # 이름 정보가 있으면 추가
+                if name and name != account:
+                    display_parts.append(name)
+                # 부서 정보가 있으면 추가
+                if department:
+                    display_parts.append(department)
+                # 항상 IP 추가
+                display_parts.append(data["primary_ip"])
+                
+                # 항상 format된 문자열 사용 (최소한 IP는 포함)
+                display_name = " | ".join(display_parts)
+                
                 recent_users.append({
                     "user_id": user_id,
-                    "display_name": user_id,
+                    "display_name": display_name,
                     "primary_ip": data["primary_ip"],
                     "total_requests": data.get("daily_requests", {}).get(today, 0),
-                    "last_access": last_access
+                    "last_access": last_access,
+                    "name": name,
+                    "department": department
                 })
         
-        # 마지막 접속 시간으로 정렬 (최신 순)
-        recent_users.sort(key=lambda x: x["last_access"], reverse=True)
+        # 마지막 접속 시간으로 정렬 (최신 순, 안정 정렬)
+        def _parse_ts(val: str) -> float:
+            try:
+                # ISO 또는 'YYYY-MM-DD HH:MM:SS'
+                try:
+                    return datetime.fromisoformat(val.replace('Z','')).timestamp()
+                except Exception:
+                    return datetime.strptime(val, "%Y-%m-%d %H:%M:%S").timestamp()
+            except Exception:
+                # 날짜만인 경우 자정으로 간주
+                try:
+                    return datetime.strptime(val, "%Y-%m-%d").timestamp()
+                except Exception:
+                    return 0.0
+        recent_users.sort(key=lambda x: (-_parse_ts(x.get("last_access", "1970-01-01")), x.get("user_id", "")))
         
         return {
             "total_recent": len(recent_users),

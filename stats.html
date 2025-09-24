@@ -685,13 +685,13 @@
             `;
             
             users.forEach(user => {
-                const displayName = user.display_name || "Anonymous";
+                const dept = user.department ? ` <span style="color:#8bc34a;">(${user.department})</span>` : '';
+                const displayName = (user.display_name || user.user_id) + dept;
                 
                 html += `
                     <div class="clickable" ondblclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
                         <div style="overflow: hidden;">
                             <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
-                            <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
                         </div>
                         <div style="text-align: center; color: #FF9800; font-weight: bold;">${user.total_requests}</div>
                         <div style="text-align: center; color: #2196F3;">${user.unique_days}일</div>
@@ -720,7 +720,8 @@
             `;
             
             recentUsers.forEach(user => {
-                const displayName = user.display_name || user.user_id;
+                const dept = user.department ? ` <span style=\"color:#8bc34a;\">(${user.department})</span>` : '';
+                const displayName = (user.display_name || user.user_id) + dept;
                 
                 // last_access가 날짜만 있는 경우와 타임스탬프가 있는 경우 구분
                 const lastAccess = formatDateTime(user.last_access);
@@ -729,7 +730,6 @@
                     <div class="clickable" ondblclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 60px 100px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
                         <div style="overflow: hidden;">
                             <span style="color: #4CAF50; font-weight: bold;">${displayName}</span>
-                            <span style="color: #888; margin-left: 8px; font-size: 0.8em;">${user.primary_ip}</span>
                         </div>
                         <div style="text-align: center; color: #FFA726; font-weight: bold;">${user.total_requests}</div>
                         <div style="text-align: center; font-size: 0.8em; color: #81C784;">${lastAccess}</div>
