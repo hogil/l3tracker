@@ -1,3 +1,22 @@
+### 썸네일 파이프라인 업데이트 (2025-09-24)
+- 프론트엔드: IntersectionObserver로 가시영역 우선 로딩 → `streamBackground()`가 16ms 간격으로 나머지 순차 로딩
+- 네트워크: `/api/thumbnail?path=...&size=...` 정적 URL 직접 사용(캐시 활용), blob URL 미사용
+- 파일 경로: `get_thumbnail_path()`가 경로 특수문자/구분자 치환 후 평탄한 파일명 생성
+- 저장 위치: 제품 폴더 선택과 무관하게 전역 `ROOT_DIR/thumbnails` 하위에 저장
+
+### 라벨링 동작
+- 그리드 다중 선택 후 Class Manager 버튼 클릭 시, 선택된 인덱스를 `this.selectedImages[idx]`로 해석하여 `{ class_name, image_path }`를 배치 전송
+- Label Explorer의 클래스 폴더 클릭이 Wafer Map Explorer의 선택을 해제하지 않도록 변경
+
+### 로그 및 운영
+- Windows 콘솔 인코딩(CP949)에서 발생하던 UnicodeEncodeError 제거(이모지 로그 제거)
+- 서버 실행은 단일 워커(`UVICORN_WORKERS=1`) 권장
+
+### SAML 프로필 표준화 (요약)
+- 표준 필드만 저장: `Username`, `LginId`, `Sabun`, `DeptName`, `x-ms-forwarded-client-ip`, `GrdName_EN`, `GrdName`
+- 백엔드에서 이전 동의어 키를 표준 키로 매핑하여 저장
+- 표시 포맷: `계정 | 이름(직급) | 부서` (계정=LginId, 이름=Username, 직급=GrdName_EN 우선)
+
 # L3 Tracker 시스템 아키텍처
 
 ## 목차

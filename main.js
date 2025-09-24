@@ -29,12 +29,19 @@ const RESET_ABSOLUTE_PERCENT_OFFSET = -0.02;
  */
 class ThumbnailManager {
     constructor() {
-        this.cache = new Map(); // path -> { url, loading, timestamp }
-        this.maxCacheSize = 500;
-        this.cacheTimeout = 10 * 60 * 1000; // 10분
+        this.cache = new Map(); // path -> { url, loading, timestamp, priority }
+        this.maxCacheSize = 1000; // 캐시 크기 증가
+        this.cacheTimeout = 15 * 60 * 1000; // 15분으로 증가
         this.concurrentLoads = 0;
-        this.maxConcurrentLoads = 8;
+        this.maxConcurrentLoads = 12; // 동시 로딩 증가
         this.loadQueue = [];
+        this.viewportQueue = []; // viewport 우선순위 큐
+        this.backgroundQueue = []; // 백그라운드 큐
+        this.isProcessingQueue = false;
+        this.backgroundRunning = false; // 백그라운드 스트리밍 상태
+        
+        // Intersection Observer 설정 (뷰포트 감지)
+        this.setupIntersectionObserver();
     }
 
     async loadThumbnail(imgPath) {
@@ -81,12 +88,11 @@ class ThumbnailManager {
         this.concurrentLoads++;
         
         try {
-            const response = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`);
-            if (response.ok) {
-                const blob = await response.blob();
-                return URL.createObjectURL(blob);
-            }
-            throw new Error(`HTTP ${response.status}`);
+            // blob URL 대신 서버 캐시 가능한 정적 썸네일 URL을 직접 사용하여
+            // blob revoke로 인한 net::ERR_FILE_NOT_FOUND 문제를 원천 차단
+            const url = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=${DEFAULT_THUMB_SIZE}`;
+            // 사전 핑 제거: 서버가 HEAD를 허용하지 않아 405가 발생하므로 생략
+            return url;
         } finally {
             this.concurrentLoads--;
             // 대기 중인 요청 처리
@@ -95,6 +101,164 @@ class ThumbnailManager {
                 resolve();
             }
         }
+    }
+
+    // Intersection Observer 설정
+    setupIntersectionObserver() {
+        this.observer = new IntersectionObserver((entries) => {
+            // 뷰포트에 들어오는 항목들을 우선순위별로 정렬
+            const visibleEntries = entries.filter(entry => entry.isIntersecting);
+            const hiddenEntries = entries.filter(entry => !entry.isIntersecting);
+            
+            // 뷰포트에 들어온 이미지들을 intersection ratio 순으로 정렬하여 우선 처리
+            visibleEntries
+                .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+                .forEach(entry => {
+                    const imgPath = entry.target.getAttribute('data-img-path');
+                    if (!imgPath) return;
+                    
+                    // 완전히 뷰포트에 들어온 이미지 최우선 처리
+                    const priority = entry.intersectionRatio > 0.5 ? 'urgent' : 'high';
+                    this.loadThumbnailAndDisplay(imgPath, entry.target, priority);
+                });
+            
+            // 뷰포트에서 나간 이미지들 우선순위 낮춤
+            hiddenEntries.forEach(entry => {
+                const imgPath = entry.target.getAttribute('data-img-path');
+                if (imgPath && entry.intersectionRatio === 0) {
+                    this.adjustPriority(imgPath, 'low');
+                }
+            });
+        }, {
+            root: document.getElementById('image-grid'),
+            rootMargin: '100px', // 100px로 줄여서 더 집중적으로 처리
+            threshold: [0, 0.1, 0.25, 0.5, 0.75, 1.0] // 더 세밀한 threshold로 우선순위 결정
+        });
+    }
+    
+    // 썸네일 로드 후 실제 이미지에 적용
+    async loadThumbnailAndDisplay(imgPath, element, priority = 'high') {
+        try {
+            const thumbnailUrl = await this.loadThumbnailWithPriority(imgPath, priority);
+            if (thumbnailUrl) {
+                // 실제 img 엘리먼트 찾기
+                const img = element.querySelector('img.grid-thumb-img') || 
+                           (element.classList.contains('grid-thumb-img') ? element : null);
+                
+                if (img && img.getAttribute('data-img-path') === imgPath) {
+                    // priority 힌트 부여 (브라우저 힌트)
+                    try { img.fetchPriority = (priority === 'urgent' ? 'high' : priority); } catch(e) {}
+                    img.loading = 'eager';
+                    img.decoding = 'async';
+                    img.src = thumbnailUrl;
+                    // onload에서 opacity가 변경됨
+                }
+            }
+        } catch (error) {
+            console.warn(`썸네일 로드 실패: ${imgPath}`, error);
+        }
+    }
+    
+    // 스크롤 시 즉시 보이는 이미지들을 감지하고 우선 로드
+    checkVisibleThumbnails() {
+        const grid = document.getElementById('image-grid');
+        if (!grid) return;
+        
+        const gridRect = grid.getBoundingClientRect();
+        // 현재 구조에 맞게 선택자 수정: placeholder(data:)가 설정된 항목이 미로드 상태
+        const images = grid.querySelectorAll('.grid-thumb-wrap img.grid-thumb-img[data-img-path]');
+        
+        images.forEach(img => {
+            if (img.src && !img.src.startsWith('data:')) return; // 이미 로드됨
+            const rect = img.getBoundingClientRect();
+            const isVisible = rect.top < gridRect.bottom && rect.bottom > gridRect.top &&
+                             rect.left < gridRect.right && rect.right > gridRect.left;
+            
+            if (isVisible) {
+                const imgPath = img.getAttribute('data-img-path');
+                if (imgPath) {
+                    // 즉시 로드 (wrapper는 grid-thumb-wrap)
+                    this.loadThumbnailAndDisplay(imgPath, img.closest('.grid-thumb-wrap'), 'urgent');
+                }
+            }
+        });
+
+        // 가시 영역 처리 후, 남은 항목은 백그라운드로 부드럽게 순차 로딩
+        this.streamBackground();
+    }
+    
+    // 엘리먼트 관찰 시작
+    observeElement(element) {
+        if (this.observer && element) {
+            this.observer.observe(element);
+        }
+    }
+    
+    // 엘리먼트 관찰 중단
+    unobserveElement(element) {
+        if (this.observer && element) {
+            this.observer.unobserve(element);
+        }
+    }
+    
+    // 우선순위별 썸네일 로딩 (기존 loadThumbnail 사용)
+    async loadThumbnailWithPriority(imgPath, priority = 'normal') {
+        // 기존 loadThumbnail 메소드 사용하되, 우선순위 정보만 저장
+        const result = await this.loadThumbnail(imgPath);
+        
+        // 우선순위 정보 저장
+        const cached = this.cache.get(imgPath);
+        if (cached) {
+            cached.priority = priority;
+        }
+        
+        return result;
+    }
+    
+    // 우선순위 조정
+    adjustPriority(imgPath, newPriority) {
+        const cached = this.cache.get(imgPath);
+        if (cached) {
+            cached.priority = newPriority;
+        }
+    }
+    
+    // 큐 처리는 단순화 - 기존 시스템 활용
+    async processQueue() {
+        // 기존 로딩 시스템 사용으로 단순화됨
+    }
+
+    // 배경에서 가시영역 아래부터 우선 → 상단 방향 순차 로딩 (멈춤 없이 지속)
+    streamBackground() {
+        if (this.backgroundRunning) return;
+        const grid = document.getElementById('image-grid');
+        if (!grid) return;
+        this.backgroundRunning = true;
+        const step = async () => {
+            const gridEl = document.getElementById('image-grid');
+            if (!gridEl) { this.backgroundRunning = false; return; }
+
+            // 아직 로드되지 않은 이미지들 수집
+            const nodes = gridEl.querySelectorAll('.grid-thumb-wrap img.grid-thumb-img[data-img-path]');
+            const pending = [];
+            nodes.forEach(img => { if (!img.src || img.src.startsWith('data:')) pending.push(img); });
+
+            // 우선순위: 현재 뷰포트 아래쪽 먼저, 없으면 전체 위→아래 중 첫 항목
+            let target = null;
+            if (pending.length > 0) {
+                const gridRect = gridEl.getBoundingClientRect();
+                target = pending.find(img => img.getBoundingClientRect().top >= gridRect.bottom) || pending[0];
+            }
+
+            if (!target) { this.backgroundRunning = false; return; }
+            const path = target.getAttribute('data-img-path');
+            try { await this.loadThumbnailAndDisplay(path, target.closest('.grid-thumb-wrap'), 'low'); } catch (e) {}
+
+            // 다음 항목을 너무 빠르게 연속 요청하지 않도록 프레임간 간격 유지
+            setTimeout(step, 16); // 약 60fps 간격
+        };
+        // 첫 스텝 시작
+        setTimeout(step, 0);
     }
 
     async preloadBatch(imagePaths) {
@@ -108,41 +272,50 @@ class ThumbnailManager {
         
         // 배치 크기 제한
         const batchSize = Math.min(uncachedPaths.length, THUMB_BATCH_SIZE || 50);
-        // 화면에 보이는 영역의 경로들을 먼저 앞쪽으로 정렬 (가시영역 우선)
+        
+        // 가시영역 체크를 더 정확하게
         let batch = uncachedPaths.slice(0, batchSize);
         try {
             const grid = document.getElementById('image-grid');
             if (grid) {
-                const rect = grid.getBoundingClientRect();
+                const gridRect = grid.getBoundingClientRect();
                 const children = Array.from(grid.querySelectorAll('[data-img-path]'));
-                const visible = new Set(children.filter(el => {
-                    const r = el.getBoundingClientRect();
-                    return r.bottom >= rect.top && r.top <= rect.bottom;
-                }).map(el => el.getAttribute('data-img-path')));
-                batch.sort((a,b) => (visible.has(b) ? 1:0) - (visible.has(a) ? 1:0));
+                
+                // 현재 보이는 영역과 곧 보일 영역을 구분
+                const visible = new Set();
+                const nearVisible = new Set();
+                
+                children.forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    const path = el.getAttribute('data-img-path');
+                    
+                    if (rect.bottom >= gridRect.top && rect.top <= gridRect.bottom) {
+                        visible.add(path); // 현재 보이는 영역
+                    } else if (rect.bottom >= gridRect.top - 400 && rect.top <= gridRect.bottom + 400) {
+                        nearVisible.add(path); // 곧 보일 영역
+                    }
+                });
+                
+                // 우선순위 정렬: 보이는 것 > 곧 보일 것 > 나머지
+                batch.sort((a, b) => {
+                    const aVisible = visible.has(a);
+                    const bVisible = visible.has(b);
+                    const aNear = nearVisible.has(a);
+                    const bNear = nearVisible.has(b);
+                    
+                    if (aVisible && !bVisible) return -1;
+                    if (!aVisible && bVisible) return 1;
+                    if (aNear && !bNear) return -1;
+                    if (!aNear && bNear) return 1;
+                    return 0;
+                });
             }
-        } catch (e) {}
-        
-        // 서버 배치 프리로드 시도
-        try {
-            const response = await fetch('/api/thumbnail/preload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ paths: batch })
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                if (batch.length > 20) { // 대량 처리시만 로그
-                    console.log(`썸네일 생성: ${result.results?.length || batch.length}개`);
-                }
-                return result;
-            }
-        } catch (error) {
-            console.warn('썸네일 배치 로드 실패, 개별 로딩으로 전환:', error);
+        } catch (e) {
+            console.warn('가시영역 계산 실패:', e);
         }
         
-        // 서버 배치 실패 시 개별 로딩
+        // 서버 배치 프리로드 비활성화: 대량 선택 시 서버/네트워크 폭주 방지
+        // 즉시 개별 로딩으로 큐에만 적재하여 IntersectionObserver가 제어
         const promises = batch.map(path => this.loadThumbnail(path));
         return Promise.allSettled(promises);
     }
@@ -1845,15 +2018,64 @@ class WaferMapViewer {
     async loadDirectoryContents(path, containerElement) {
         console.log("[DEBUG] loadDirectoryContents called with path:", path);
         try {
+            // 루트 경로이고 첫 로딩이면 우선순위 API 사용
+            if (!path && containerElement === this.dom.fileExplorer) {
+                await this.loadDirectoryWithPriority(path, containerElement);
+                return;
+            }
+            
             const url = path ? `/api/files?path=${encodeURIComponent(path)}` : '/api/files';
             console.log("[DEBUG] Fetching URL:", url);
             const data = await fetchJson(url);
             const files = Array.isArray(data.items) ? data.items : [];
             containerElement.innerHTML = this.createFileTreeHtml(files, path || '');
-            // classification 폴더 자동 확장 제거 (항상 닫힘)
+            
         } catch (error) {
             containerElement.innerHTML = `<p style=\"color: #ff5555; padding: 10px;\">Error loading files.</p>`;
             console.error("[DEBUG] loadDirectoryContents error:", error);
+        }
+    }
+    
+    // 우선순위 기반 폴더 로딩 (classification 우선)
+    async loadDirectoryWithPriority(path, containerElement) {
+        console.log("[DEBUG] loadDirectoryWithPriority called with path:", path);
+        try {
+            // 1단계: 우선순위 폴더들 먼저 로드 (classification 우선)
+            const priorityUrl = path ? `/api/files/priority?path=${encodeURIComponent(path)}` : '/api/files/priority';
+            console.log("[DEBUG] Fetching priority URL:", priorityUrl);
+            
+            const priorityData = await fetchJson(priorityUrl);
+            const priorityFiles = Array.isArray(priorityData.items) ? priorityData.items : [];
+            
+            // 우선순위 폴더들 먼저 표시
+            containerElement.innerHTML = this.createFileTreeHtml(priorityFiles, path || '');
+            console.log("[DEBUG] Priority folders loaded:", priorityFiles.length);
+            
+            // 2단계: 남은 폴더들을 백그라운드에서 lazy loading
+            if (priorityData.has_more) {
+                setTimeout(async () => {
+                    try {
+                        const remainingUrl = path ? `/api/files/remaining?path=${encodeURIComponent(path)}` : '/api/files/remaining';
+                        console.log("[DEBUG] Fetching remaining URL:", remainingUrl);
+                        
+                        const remainingData = await fetchJson(remainingUrl);
+                        const remainingFiles = Array.isArray(remainingData.items) ? remainingData.items : [];
+                        
+                        // 기존 우선순위 폴더에 남은 폴더들 추가
+                        const allFiles = [...priorityFiles, ...remainingFiles];
+                        containerElement.innerHTML = this.createFileTreeHtml(allFiles, path || '');
+                        console.log("[DEBUG] Remaining folders loaded:", remainingFiles.length);
+                        
+                    } catch (error) {
+                        console.warn("[DEBUG] Failed to load remaining folders:", error);
+                    }
+                }, 100); // 100ms 후에 남은 폴더들 로드
+            }
+            
+        } catch (error) {
+            console.error("[DEBUG] loadDirectoryWithPriority error:", error);
+            // 폴백: 일반 로딩 방식 사용
+            this.loadDirectoryContents(path, containerElement);
         }
     }
 
@@ -4701,12 +4923,7 @@ class WaferMapViewer {
                 const isCtrl = e.ctrlKey || e.metaKey;
                 const isShift = e.shiftKey;
                 
-                // 다른 Explorer 선택 해제
-                try {
-                    this.clearWaferMapExplorerSelection();
-                } catch (error) {
-                    console.warn('clearWaferMapExplorerSelection error:', error);
-                }
+                // Wafer Map Explorer 선택은 유지해야 함: 선택 해제 호출 제거
                 
                 // 아무 modifier 없이 클릭: 열기/닫기 토글만
                 if (!isCtrl && !isShift) {
@@ -5373,88 +5590,127 @@ class WaferMapViewer {
         grid.innerHTML = '';
         // grid 모드에서는 cursor를 default로
         this.dom.viewerContainer.style.cursor = 'default';
-        this.showGridImmediately(images);
-        setTimeout(() => {
-            this.loadCurrentFolderThumbnails(images);
-        }, 100);
+        // 점진 렌더링으로 UI 멈춤 방지 (가시영역 우선, 백그라운드 순차 로드)
+        this.showGridStream(images);
         grid.classList.add('active');
         setTimeout(() => this.updateGridSquaresPixel(), 0);
         if (!this.gridResizeObserver) {
             this.gridResizeObserver = new ResizeObserver(() => this.updateGridSquaresPixel());
             this.gridResizeObserver.observe(grid);
         }
+        
+        // 스크롤 시 보이는 썸네일 우선 로드를 위한 이벤트 리스너
+        this.setupGridScrollOptimization();
     }
 
-    showGridImmediately(images) {
+    // 그리드 스크롤 최적화 설정
+    setupGridScrollOptimization() {
         const grid = document.getElementById('image-grid');
-        images.forEach((imgPath, idx) => {
-            const wrap = document.createElement('div');
-            wrap.className = 'grid-thumb-wrap' + (this.gridSelectedIdxs.includes(idx) ? ' selected' : '');
-            // 클릭 이벤트는 onMouseUp에서 처리하므로 여기서는 제거
-            // wrap.onclick = e => { e.stopPropagation(); this.toggleGridImageSelect(idx, e); };
-            wrap.ondblclick = e => { e.stopPropagation(); this.enterSingleImageMode(idx); };
+        if (!grid) return;
+        
+        // 기존 이벤트 리스너 제거
+        if (this.gridScrollHandler) {
+            grid.removeEventListener('scroll', this.gridScrollHandler);
+        }
+        
+        // 스크롤 최적화를 위한 디바운스 및 쓰로틀
+        let scrollTimeout;
+        let lastScrollTime = 0;
+        const scrollThrottle = 50; // 50ms 간격으로 처리
+        
+        this.gridScrollHandler = () => {
+            const now = Date.now();
             
-            // 우클릭 컨텍스트 메뉴 표시
-            wrap.oncontextmenu = e => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.showContextMenu(e, idx);
-            };
-            // 썸네일 이미지 컨테이너
-            const thumbBox = document.createElement('div');
-            thumbBox.className = 'grid-thumb-imgbox';
-            const img = document.createElement('img');
-            img.className = 'grid-thumb-img';
-            img.alt = imgPath.split('/').pop();
-            img.loading = 'lazy';
-            img.decoding = 'async';
-            img.style.opacity = '0';
-            
-            // 고품질 이미지 렌더링 설정
-            img.style.imageRendering = 'high-quality';
-            img.style.imageRendering = 'crisp-edges';
-            img.style.imageRendering = '-webkit-optimize-contrast';
-            
-            // 브라우저 기본 drag&drop 방지
-            img.ondragstart = e => e.preventDefault();
-            
-            // 이미지 로드 핸들러
-            img.onload = () => {
-                img.style.opacity = '1';
-                // 원본 이미지 유지 - 썸네일로 교체하지 않음
-            };
-            
-            img.onerror = () => {
-                // 실패시 기본 스타일 적용
-                img.style.backgroundColor = '#333';
-                img.style.opacity = '0.5';
-                
-                // 실패 후에도 썸네일 시도 (서버에서 썸네일이 생성되었을 수 있음)
-                setTimeout(() => {
-                    if (img.parentElement) {
-                        this.replaceWithThumbnail(img, imgPath);
-                    }
-                }, 500);
-            };
-            
-            // 고화질 썸네일로 시작 (빠른 로딩)
-            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`;
-            thumbBox.appendChild(img);
-            wrap.appendChild(thumbBox);
-            // Checkmark
-            if (this.gridSelectedIdxs.includes(idx)) {
-                const check = document.createElement('div');
-                check.className = 'grid-thumb-check';
-                check.textContent = '✔';
-                thumbBox.appendChild(check);
+            // 쓰로틀링: 너무 빈번한 호출 방지
+            if (now - lastScrollTime < scrollThrottle) {
+                return;
             }
-            // 파일명
-            const label = document.createElement('div');
-            label.className = 'grid-thumb-label';
-            label.textContent = imgPath.split('/').pop();
-            wrap.appendChild(label);
-            grid.appendChild(wrap);
-        });
+            lastScrollTime = now;
+            
+            // 즉시 보이는 썸네일 확인
+            this.thumbnailManager.checkVisibleThumbnails();
+            
+            // 디바운스: 스크롤이 멈춘 후 전체 재검사
+            if (scrollTimeout) {
+                clearTimeout(scrollTimeout);
+            }
+            scrollTimeout = setTimeout(() => {
+                this.thumbnailManager.checkVisibleThumbnails();
+            }, 100);
+        };
+        
+        // 스크롤 이벤트 리스너 추가 (passive 옵션으로 성능 향상)
+        grid.addEventListener('scroll', this.gridScrollHandler, { passive: true });
+        
+        // 초기 로드 시에도 보이는 썸네일 확인
+        setTimeout(() => {
+            this.thumbnailManager.checkVisibleThumbnails();
+        }, 200);
+    }
+
+    // 크고 많은 DOM을 여러 프레임에 나눠 점진 렌더링하여 스크롤/줌이 멈추지 않게 함
+    showGridStream(images) {
+        const grid = document.getElementById('image-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        const total = images.length;
+        const batchSize = 120;
+        let index = 0;
+        const renderBatch = () => {
+            if (!this.gridMode) return;
+            const frag = document.createDocumentFragment();
+            const end = Math.min(index + batchSize, total);
+            for (let i = index; i < end; i++) {
+                const imgPath = images[i];
+                const wrap = document.createElement('div');
+                wrap.className = 'grid-thumb-wrap' + (this.gridSelectedIdxs.includes(i) ? ' selected' : '');
+                wrap.setAttribute('data-img-path', imgPath);
+                wrap.setAttribute('data-img-idx', i);
+                wrap.ondblclick = e => { e.stopPropagation(); this.enterSingleImageMode(i); };
+                wrap.oncontextmenu = e => { e.preventDefault(); e.stopPropagation(); this.showContextMenu(e, i); };
+
+                const thumbBox = document.createElement('div');
+                thumbBox.className = 'grid-thumb-imgbox';
+                const img = document.createElement('img');
+                img.className = 'grid-thumb-img';
+                img.alt = imgPath.split('/').pop();
+                img.setAttribute('data-img-path', imgPath);
+                img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiNmNWY1ZjUiLz48L3N2Zz4=';
+                img.loading = 'lazy';
+                img.decoding = 'async';
+                img.style.opacity = '0';
+                img.style.backgroundColor = '#f5f5f5';
+                img.style.imageRendering = 'high-quality';
+                img.style.imageRendering = 'crisp-edges';
+                img.style.imageRendering = '-webkit-optimize-contrast';
+                img.ondragstart = e => e.preventDefault();
+                this.thumbnailManager.observeElement(wrap);
+                img.onload = () => { if (img.src && !img.src.startsWith('data:')) { img.style.opacity = '1'; img.style.backgroundColor = 'transparent'; } };
+                img.onerror = () => { img.style.backgroundColor = '#333'; img.style.opacity = '0.5'; setTimeout(() => { if (img.parentElement) { this.replaceWithThumbnail(img, imgPath); } }, 500); };
+                // 즉시 네트워크 요청을 시작하지 않고, IntersectionObserver가 보이는 항목부터 src 설정
+                thumbBox.appendChild(img);
+                wrap.appendChild(thumbBox);
+                if (this.gridSelectedIdxs.includes(i)) {
+                    const check = document.createElement('div');
+                    check.className = 'grid-thumb-check';
+                    check.textContent = '✔';
+                    thumbBox.appendChild(check);
+                }
+                const label = document.createElement('div');
+                label.className = 'grid-thumb-label';
+                label.textContent = imgPath.split('/').pop();
+                wrap.appendChild(label);
+                frag.appendChild(wrap);
+            }
+            grid.appendChild(frag);
+            index = end;
+            this.updateGridSquaresPixel();
+            this.thumbnailManager.checkVisibleThumbnails();
+            if (index < total) {
+                requestAnimationFrame(renderBatch);
+            }
+        };
+        requestAnimationFrame(renderBatch);
     }
 
     async replaceWithThumbnail(img, imgPath) {

@@ -57,6 +57,12 @@ class SemiconductorRenderer {
         this._lastLevelKey = '1';         // 마지막으로 적용된 레벨 키
         this._lastEnsureAt = 0;           // 직전 보장 시각(ms)
         
+        // 성능 최적화 관련
+        this.renderThrottleTime = 16;     // ~60fps
+        this.lastRenderTime = 0;
+        this.pendingRender = null;
+        this.isRenderScheduled = false;
+        
         this.setupPixelPerfectCanvas();
     }
     
@@ -266,6 +272,59 @@ class SemiconductorRenderer {
         // selectPyramidLevel()과 createDownscaledImage()만 제공하는 헬퍼 역할.
         // 하지만 피라미드 생성은 여전히 필요하므로 loadImage에서 호출됨.
         return;
+    }
+    
+    /**
+     * 스로틀된 렌더링 (외부에서 호출용)
+     * 60fps로 제한하여 부드러운 성능 보장
+     */
+    renderThrottled(callback) {
+        const now = Date.now();
+        
+        // 마지막 렌더링 이후 충분한 시간이 지났으면 즉시 렌더링
+        if (now - this.lastRenderTime >= this.renderThrottleTime) {
+            this.lastRenderTime = now;
+            if (callback) callback();
+            return;
+        }
+        
+        // 이미 스케줄된 렌더링이 있으면 취소하고 새로운 콜백으로 대체
+        if (this.pendingRender) {
+            cancelAnimationFrame(this.pendingRender);
+        }
+        
+        // 다음 프레임에 렌더링 스케줄
+        this.pendingRender = requestAnimationFrame(() => {
+            this.lastRenderTime = Date.now();
+            this.pendingRender = null;
+            if (callback) callback();
+        });
+    }
+    
+    /**
+     * 고성능 줌 렌더링
+     * 줌 변경 시 사용하는 최적화된 렌더링
+     */
+    renderForZoom(callback) {
+        // 줌 시에는 더 공격적인 스로틀링 (30fps)
+        const zoomThrottleTime = 33;
+        const now = Date.now();
+        
+        if (now - this.lastRenderTime >= zoomThrottleTime) {
+            this.lastRenderTime = now;
+            if (callback) callback();
+            return;
+        }
+        
+        if (this.pendingRender) {
+            cancelAnimationFrame(this.pendingRender);
+        }
+        
+        this.pendingRender = requestAnimationFrame(() => {
+            this.lastRenderTime = Date.now();
+            this.pendingRender = null;
+            if (callback) callback();
+        });
     }
     
     /**

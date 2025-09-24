@@ -763,8 +763,12 @@ def is_supported_image(path: Path) -> bool:
 
 def get_thumbnail_path(image_path: Path, size: Tuple[int, int]) -> Path:
     relative_path = image_path.relative_to(ROOT_DIR)
-    thumbnail_name = f"{relative_path.stem}_{size[0]}x{size[1]}.{THUMBNAIL_FORMAT.lower()}"
-    return THUMBNAIL_DIR / relative_path.parent / thumbnail_name
+    # 플랫 구조 + 안전한 파일명: 경로 구분자/제어문자/따옴표 등 비허용 문자를 '_'로 치환
+    safe = str(relative_path).replace('\\', '/')
+    safe = re.sub(r"[^A-Za-z0-9._\-\/]", "_", safe)
+    path_hash = safe.replace('/', '_')
+    thumbnail_name = f"{path_hash}_{size[0]}x{size[1]}.{THUMBNAIL_FORMAT.lower()}"
+    return THUMBNAIL_DIR / thumbnail_name
 
 def safe_resolve_path(path: Optional[str]) -> Path:
     if not path: return ROOT_DIR
@@ -1036,16 +1040,106 @@ async def get_files(path: Optional[str] = None, prefer: Optional[str] = None):
         if any(x in str(target).replace('\\', '/') for x in ['classification', 'images', 'labels']):
             _dircache_invalidate(target)
         items = list_dir_fast(target)
-        # prefer 폴더명을 최상단에
-        if prefer:
-            try:
-                prefer_low = prefer.lower()
-                items.sort(key=lambda x: (0 if x['type']=='directory' and x['name'].lower()==prefer_low else 1, x['name'].lower()), reverse=True)
-            except Exception:
-                pass
+        
+        # classification 폴더를 최우선으로 정렬 (내림차순)
+        def sort_priority(item):
+            name_lower = item['name'].lower()
+            if item['type'] == 'directory':
+                if name_lower == 'classification':
+                    return (0, '')  # 최우선 (classification은 항상 맨 위)
+                elif prefer and name_lower == prefer.lower():
+                    return (1, '')  # prefer 폴더 (두 번째)
+                else:
+                    return (2, name_lower)  # 기타 폴더 (내림차순)
+            else:
+                return (3, name_lower)  # 파일들 (내림차순)
+        
+        # 우선 기본 정렬 후, 기타 폴더들과 파일들만 내림차순으로 재정렬
+        items.sort(key=sort_priority)
+        
+        # classification과 prefer 폴더를 제외한 나머지를 내림차순 정렬
+        classification_items = [item for item in items if item['type'] == 'directory' and item['name'].lower() == 'classification']
+        prefer_items = [item for item in items if item['type'] == 'directory' and prefer and item['name'].lower() == prefer.lower()]
+        other_dirs = [item for item in items if item['type'] == 'directory' and item['name'].lower() != 'classification' and not (prefer and item['name'].lower() == prefer.lower())]
+        files = [item for item in items if item['type'] == 'file']
+        
+        # 기타 폴더들과 파일들 내림차순 정렬
+        other_dirs.sort(key=lambda x: x['name'].lower(), reverse=True)
+        files.sort(key=lambda x: x['name'].lower(), reverse=True)
+        
+        # 최종 순서: classification → prefer → 기타폴더들(내림차순) → 파일들(내림차순)
+        items = classification_items + prefer_items + other_dirs + files
         return {"success": True, "items": items}
     except Exception as e:
         logger.exception(f"폴더 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 우선순위 기반 폴더 로딩 (classification 우선)
+@app.get("/api/files/priority")
+async def get_files_priority(path: Optional[str] = None, priority_folders: Optional[str] = "classification"):
+    try:
+        target = safe_resolve_path(path)
+        if not target.exists() or not target.is_dir():
+            return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
+        
+        priority_list = [f.strip().lower() for f in (priority_folders or "").split(",")]
+        items = list_dir_fast(target)
+        
+        # 우선순위 폴더들만 먼저 반환
+        priority_items = []
+        regular_items = []
+        
+        for item in items:
+            if item['type'] == 'directory' and item['name'].lower() in priority_list:
+                priority_items.append(item)
+            else:
+                regular_items.append(item)
+        
+        # classification 폴더가 있으면 즉시 반환
+        classification_folder = next((item for item in priority_items if item['name'].lower() == 'classification'), None)
+        if classification_folder:
+            return {
+                "success": True, 
+                "items": [classification_folder],
+                "has_more": len(regular_items) + len([x for x in priority_items if x != classification_folder]) > 0,
+                "remaining": len(regular_items) + len([x for x in priority_items if x != classification_folder])
+            }
+        
+        priority_items.sort(key=lambda x: x['name'].lower(), reverse=True)
+        return {
+            "success": True, 
+            "items": priority_items,
+            "has_more": len(regular_items) > 0,
+            "remaining": len(regular_items)
+        }
+    except Exception as e:
+        logger.exception(f"우선순위 폴더 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 남은 폴더들을 lazy loading으로 반환
+@app.get("/api/files/remaining")
+async def get_remaining_files(path: Optional[str] = None, skip_folders: Optional[str] = "classification"):
+    try:
+        target = safe_resolve_path(path)
+        if not target.exists() or not target.is_dir():
+            return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
+        
+        skip_list = [f.strip().lower() for f in (skip_folders or "").split(",")]
+        items = list_dir_fast(target)
+        
+        # 스킵할 폴더들을 제외하고 반환
+        remaining_items = [item for item in items 
+                         if not (item['type'] == 'directory' and item['name'].lower() in skip_list)]
+        
+        # 폴더들을 먼저, 파일들을 나중에 정렬 (내림차순)
+        directories = [x for x in remaining_items if x["type"] == "directory"]
+        files = [x for x in remaining_items if x["type"] == "file"]
+        directories.sort(key=lambda x: x["name"].lower(), reverse=True)
+        files.sort(key=lambda x: x["name"].lower(), reverse=True)
+        
+        return {"success": True, "items": directories + files}
+    except Exception as e:
+        logger.exception(f"남은 파일 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- Helpers ----------------
@@ -1749,7 +1843,10 @@ async def change_folder(request: Request):
 
         global ROOT_DIR, THUMBNAIL_DIR, LABELS_DIR, LABELS_FILE
         ROOT_DIR = new_path_obj
-        THUMBNAIL_DIR = ROOT_DIR / "thumbnails"
+        # 썸네일은 항상 이미지 루트(최초 설정 경로)의 thumbnails 폴더를 사용
+        from .config import ROOT_DIR as ORIGINAL_ROOT_DIR
+        THUMBNAIL_DIR = Path(ORIGINAL_ROOT_DIR) / "thumbnails"
+        # 라벨 저장 폴더는 현재 탐색 폴더 기준으로 유지 (의도된 동작)
         LABELS_DIR = ROOT_DIR / "classification"
         LABELS_FILE = LABELS_DIR / "labels.json"
 
@@ -1803,13 +1900,14 @@ async def browse_folders(path: Optional[str] = None):
 @app.on_event("startup")
 async def startup_event():
     bootlog = logging.getLogger("uvicorn.error")
-    bootlog.info("🚀 L3Tracker 서버 시작 (테이블 로그 시스템)")
+    bootlog.info("L3Tracker 서버 시작 (테이블 로그 시스템)")
     scheme = "HTTPS" if config.SSL_ENABLED else "HTTP"
     port_to_log = config.HTTPS_PORT if config.SSL_ENABLED else config.DEFAULT_PORT
-    bootlog.info(f"📍 호스트: {config.DEFAULT_HOST}")
-    bootlog.info(f"🔌 포트: {port_to_log} ({scheme})")
-    bootlog.info(f"📁 ROOT_DIR: {config.ROOT_DIR}")
-    bootlog.info(f"🔧 PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}")
+    # Windows 콘솔(cp949) 환경에서 이모지 출력 시 UnicodeEncodeError가 발생할 수 있어 ASCII로 표기
+    bootlog.info(f"HOST: {config.DEFAULT_HOST}")
+    bootlog.info(f"PORT: {port_to_log} ({scheme})")
+    bootlog.info(f"ROOT_DIR: {config.ROOT_DIR}")
+    bootlog.info(f"PROJECT_ROOT: {os.getenv('PROJECT_ROOT', 'NOT SET')}")
     bootlog.info("=" * 50)
     print_access_header_once()
 
@@ -1838,7 +1936,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    logging.getLogger("uvicorn.error").info("🛑 L3Tracker 서버 종료")
+    logging.getLogger("uvicorn.error").info("L3Tracker 서버 종료")
 
 # ======================== __main__ ========================
 if __name__ == "__main__":

@@ -19,7 +19,10 @@
       "Bash(start chrome https://localhost:8443/stats)",
       "Bash(dir)",
       "Bash(start chrome https://localhost:8444/stats)",
-      "Bash(del logsdetailed_access.csv)"
+      "Bash(del logsdetailed_access.csv)",
+      "Bash(dir:*)",
+      "Bash(del:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
