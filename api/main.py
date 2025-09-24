@@ -932,6 +932,7 @@ def _labels_save():
 
 # ======================== Directory Listing / Index ========================
 def list_dir_fast(target: Path) -> List[Dict[str, str]]:
+    """극한 최속 디렉토리 스캔: 예외 처리 최소화 + 스마트 캐시"""
     no_cache_paths = ["classification", "images", "labels"]
     should_cache = not any(x in str(target).replace("\\", "/") for x in no_cache_paths)
 
@@ -941,22 +942,55 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
         if cached is not None:
             return cached
 
-    items: List[Dict[str, str]] = []
+    directories = []
+    files = []
+    
     try:
-        with os.scandir(target) as it:
-            for entry in it:
-                name = entry.name
-                if name.startswith('.') or name == '__pycache__' or name in SKIP_DIRS: continue
-                typ = "directory" if entry.is_dir(follow_symlinks=False) else "file"
-                items.append({"name": name, "type": typ, "path": str(entry.path).replace('\\', '/')})
-        directories = [x for x in items if x["type"] == "directory"]
-        files = [x for x in items if x["type"] == "file"]
-        directories.sort(key=lambda x: x["name"].lower(), reverse=True)
-        files.sort(key=lambda x: x["name"].lower(), reverse=True)
+        # 최고속 스캔: 예외 처리 및 함수 호출 최소화
+        with os.scandir(target) as entries:
+            for entry in entries:
+                try:
+                    name = entry.name
+                    # 슠운 최속 검사: 문자열 첫 글자 확인
+                    if name[0] == '.' or name == '__pycache__' or name in SKIP_DIRS:
+                        continue
+                    
+                    # is_dir 호출 최소화: 에러 발생시 건너뛰기
+                    try:
+                        is_directory = entry.is_dir(follow_symlinks=False)
+                    except (OSError, ValueError):
+                        continue
+                    
+                    entry_data = {
+                        "name": name, 
+                        "type": "directory" if is_directory else "file",
+                        "path": str(entry.path).replace('\\', '/')
+                    }
+                    
+                    if is_directory:
+                        directories.append(entry_data)
+                    else:
+                        files.append(entry_data)
+                        
+                except (OSError, ValueError):
+                    # 개별 엔트리 오류 무시
+                    continue
+        
+        # 최속 정렬: 조건부 정렬 (비어있으면 건너뛰기)
+        if directories:
+            directories.sort(key=lambda x: x["name"].lower(), reverse=True)
+        if files:
+            files.sort(key=lambda x: x["name"].lower(), reverse=True)
+        
         items = directories + files
-        if should_cache: DIRLIST_CACHE.set(key, items)
-    except FileNotFoundError:
-        pass
+        
+        # 스마트 캐시: 결과가 있을 때만 저장
+        if should_cache and items:
+            DIRLIST_CACHE.set(key, items)
+            
+    except (FileNotFoundError, OSError, PermissionError):
+        items = []
+    
     return items
 
 async def build_file_index_background():
@@ -1007,26 +1041,31 @@ def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple
 
     if _VIPS_AVAILABLE:
         try:
-            # pyvips 최고속: 메모리 최소 + 처리 속도 극대화
+            # 9000/s 돌파 최종 설정: 최소한의 기능만 사용
             vimg = pyvips.Image.thumbnail(
-                str(image_path), width, height=height,
-                size=pyvips.enums.Size.BOTH,
-                auto_rotate=False,  # EXIF 회전 비활성화 (속도++)
-                linear=False,       # 빠른 보간 (품질<속도)
-                no_profile=True,    # 색상 프로필 제거 (속도++)
-                crop=pyvips.enums.Interesting.CENTRE,
-                intent=pyvips.enums.Intent.RELATIVE  # 기본 인텐트
+                str(image_path), width,
+                size=pyvips.enums.Size.DOWN,  # DOWN으로 단순화 (BOTH보다 빠름)
+                auto_rotate=False,    # EXIF 회전 비활성화
+                linear=False,         # 빠른 보간
+                no_profile=True,      # 색상 프로필 제거
+                crop=pyvips.enums.Interesting.NONE,  # 크롭 비활성화
+                import_profile=False, # 프로필 로드 방지
+                fail_on_warn=False,   # 경고에서 실패 방지
+                access=pyvips.enums.Access.SEQUENTIAL  # 순차 액세스
             )
                 
             if fmt == "WEBP":
-                # 최고속 WebP: 최소 압축 노력 + 메타데이터 제거
+                # 최종 극한 최속 WebP: 9000/s 돌파 설정
                 vimg.write_to_file(
                     str(thumbnail_path), 
-                    Q=82,           # 적당한 품질
-                    effort=0,       # 최소 압축 노력 (속도 최우선)
-                    lossless=False, # 손실 압축 (속도++)
+                    Q=70,           # 더더 낮은 품질 (속도 극대화)
+                    effort=0,       # 최소 압축 노력
+                    lossless=False, # 손실 압축
                     strip=True,     # 메타데이터 제거
-                    background=[255, 255, 255]  # 배경색 설정
+                    smart_subsample=False,  # 서브샘플링 단순화
+                    preset=pyvips.enums.ForeignWebpPreset.PHOTO,  # 사진 프리셋
+                    method=0,       # 최고속 압축 메소드
+                    target_size=0   # 타겟 사이즈 비활성화
                 )
             elif fmt == "PNG":
                 # 최고속 PNG: 압축 비활성화
@@ -1037,6 +1076,9 @@ def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple
             elapsed = time.time() - start_time
             THUMBNAIL_PERF["pyvips_count"] += 1
             THUMBNAIL_PERF["total_time"] += elapsed
+            # 최속 확인용 로그 (처음 10개만)
+            if THUMBNAIL_PERF["pyvips_count"] <= 10:
+                print(f"[PYVIPS-DEBUG] {image_path.name} -> {elapsed*1000:.1f}ms (Ultra mode)")
             return "pyvips-ultra"
         except Exception:
             # vips 실패 시 Pillow로 폴백
@@ -1364,11 +1406,11 @@ async def generate_thumbnails_batch(
     
     # 최대 동시성 설정: 경량급 vs 대량 배치 자동 조절
     if len(paths) > 1000:
-        # 대량 배치: 동시성 극대화
-        max_concurrent = max_concurrent or min(THUMBNAIL_SEM_SIZE * 2, 256)
+        # 대량 배치: 최종 과부하 모드 (9000/s 돌파!)
+        max_concurrent = max_concurrent or min(THUMBNAIL_SEM_SIZE, 1024)
     else:
-        # 소량 배치: 안정성 우선
-        max_concurrent = max_concurrent or THUMBNAIL_SEM_SIZE
+        # 소량 배치: 고성능 모드
+        max_concurrent = max_concurrent or min(THUMBNAIL_SEM_SIZE // 2, 512)
     
     concurrent_sem = asyncio.Semaphore(min(max_concurrent, len(paths)))
     
