@@ -484,19 +484,36 @@
             const values = data.items.map(([,c]) => c);
             const ctx = document.getElementById('deptChart');
             if (window.deptChartInstance) window.deptChartInstance.destroy();
+            
+            console.log('부서 차트 데이터:', { labels, values }); // 디버그 로그
+            
             window.deptChartInstance = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels,
                     datasets: [{
-                        label: '요청 수',
+                        label: '사용자 수',
                         data: values,
                         backgroundColor: 'rgba(139, 195, 74, 0.8)',
                         borderColor: '#8bc34a',
                         borderWidth: 1
                     }]
                 },
-                options: getChartOptions('부서별')
+                options: {
+                    ...getChartOptions('부서별'),
+                    scales: {
+                        ...getChartOptions('부서별').scales,
+                        y: {
+                            ...getChartOptions('부서별').scales.y,
+                            ticks: {
+                                ...getChartOptions('부서별').scales.y.ticks,
+                                callback: function(value) {
+                                    return Math.floor(value) + '명';
+                                }
+                            }
+                        }
+                    }
+                }
             });
         }
         
@@ -537,7 +554,6 @@
             const labels = sortedDates.map(date => formatChartDate(date));
             const activeUsers = sortedDates.map(date => trendData[date].active_users);
             const newUsers = sortedDates.map(date => trendData[date].new_users);
-            const totalRequests = sortedDates.map(date => trendData[date].total_requests);
             
             dailyChart = new Chart(ctx, {
                 type: 'line',
@@ -550,7 +566,8 @@
                             borderColor: '#4CAF50',
                             backgroundColor: 'rgba(76, 175, 80, 0.1)',
                             tension: 0.4,
-                            fill: true
+                            fill: true,
+                            yAxisID: 'y'
                         },
                         {
                             label: '신규 사용자',
@@ -558,19 +575,62 @@
                             borderColor: '#2196F3',
                             backgroundColor: 'rgba(33, 150, 243, 0.1)',
                             tension: 0.4,
-                            fill: true
-                        },
-                        {
-                            label: '총 요청 수',
-                            data: totalRequests,
-                            borderColor: '#FF9800',
-                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                            yAxisID: 'y1',
-                            tension: 0.4
+                            fill: true,
+                            yAxisID: 'y1'
                         }
                     ]
                 },
-                options: getChartOptions('일별')
+                options: {
+                    ...getChartOptions('일별'),
+                    scales: {
+                        ...getChartOptions('일별').scales,
+                        y: {
+                            ...getChartOptions('일별').scales.y,
+                            title: {
+                                display: true,
+                                text: '활성 사용자',
+                                color: '#4CAF50',
+                                font: { size: 18 }
+                            },
+                            ticks: {
+                                ...getChartOptions('일별').scales.y.ticks,
+                                callback: function(value) {
+                                    return Math.floor(value);
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '신규 사용자',
+                                color: '#2196F3',
+                                font: { size: 18 }
+                            },
+                            ticks: {
+                                color: '#aaaaaa',
+                                font: { size: 18 },
+                                callback: function(value) {
+                                    return Math.floor(value);
+                                }
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        ...getChartOptions('일별').plugins,
+                        legend: {
+                            labels: {
+                                color: '#ffffff',
+                                font: { size: 18 }
+                            }
+                        }
+                    }
+                }
             });
         }
         
@@ -589,7 +649,6 @@
             const labels = sortedMonths.map(month => monthlyData[month].month_name);
             const activeUsers = sortedMonths.map(month => monthlyData[month].active_users);
             const newUsers = sortedMonths.map(month => monthlyData[month].new_users);
-            const totalRequests = sortedMonths.map(month => monthlyData[month].total_requests);
             
             monthlyChart = new Chart(ctx, {
                 type: 'bar',
@@ -601,26 +660,70 @@
                             data: activeUsers,
                             backgroundColor: 'rgba(76, 175, 80, 0.8)',
                             borderColor: '#4CAF50',
-                            borderWidth: 1
+                            borderWidth: 1,
+                            yAxisID: 'y'
                         },
                         {
                             label: '신규 사용자',
                             data: newUsers,
                             backgroundColor: 'rgba(33, 150, 243, 0.8)',
                             borderColor: '#2196F3',
-                            borderWidth: 1
-                        },
-                        {
-                            label: '총 요청 수',
-                            data: totalRequests,
-                            backgroundColor: 'rgba(255, 152, 0, 0.8)',
-                            borderColor: '#FF9800',
                             borderWidth: 1,
                             yAxisID: 'y1'
                         }
                     ]
                 },
-                options: getChartOptions('월별')
+                options: {
+                    ...getChartOptions('월별'),
+                    scales: {
+                        ...getChartOptions('월별').scales,
+                        y: {
+                            ...getChartOptions('월별').scales.y,
+                            title: {
+                                display: true,
+                                text: '활성 사용자',
+                                color: '#4CAF50',
+                                font: { size: 18 }
+                            },
+                            ticks: {
+                                ...getChartOptions('월별').scales.y.ticks,
+                                callback: function(value) {
+                                    return Math.floor(value);
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '신규 사용자',
+                                color: '#2196F3',
+                                font: { size: 18 }
+                            },
+                            ticks: {
+                                color: '#aaaaaa',
+                                font: { size: 18 },
+                                callback: function(value) {
+                                    return Math.floor(value);
+                                }
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        ...getChartOptions('월별').plugins,
+                        legend: {
+                            labels: {
+                                color: '#ffffff',
+                                font: { size: 18 }
+                            }
+                        }
+                    }
+                }
             });
         }
         
@@ -652,7 +755,7 @@
                         ticks: {
                             color: '#aaaaaa',
                             font: {
-                                size: 9
+                                size: 18
                             }
                         },
                         grid: {
@@ -666,10 +769,16 @@
                         ticks: {
                             color: '#aaaaaa',
                             font: {
-                                size: 9
+                                size: 18
                             },
-                            stepSize: 1,
-                            precision: 0
+                            callback: function(value) {
+                                // 대용량 데이터 대비 스마트 포맷팅
+                                const num = Math.floor(value);
+                                if (num >= 1000) {
+                                    return (num / 1000).toFixed(1) + 'K';
+                                }
+                                return num;
+                            }
                         },
                         grid: {
                             color: 'rgba(255, 255, 255, 0.1)'
