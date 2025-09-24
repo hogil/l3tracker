@@ -527,10 +527,11 @@ async def saml_acs(request: Request):
             "team": pick("team", "Team"),
             "title": pick("title", "Title", "GrdName", "GrdName_EN"),
             "email": pick("email", "Email", "mail"),
+            "name": pick("name", "Name", "displayName", "cn", "Username"),
             # 사내 전용 필드들 보존
             "login_id": pick("LoginId"),
             "department_id": pick("DeptId"),
-            "employee_id": pick("Sabun"),
+            "employee_id": pick("employeeId", "Sabun"),
             "department_name": pick("DeptName"),
             "grade": pick("GrdName"),
             "grade_en": pick("GrdName_EN"),
@@ -592,6 +593,8 @@ async def saml_dev_login(request: Request):
         "title": title or grd_name or grd_name_en,
         "account": account,
         "pc": pc,
+        "name": username,  # name 필드 추가
+        "email": user if "@" in user else None,  # user가 이메일 형식이면 email로 설정
         # 사내 보존 필드들
         "login_id": login_id or account,
         "department_id": dept_id,

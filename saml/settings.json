@@ -1,0 +1,28 @@
+{
+  "sp": {
+    "entityId": "l3tracker-sp",
+    "assertionConsumerService": {
+      "url": "https://hgchoik.duckdns.org:8443/saml/acs",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    },
+    "singleLogoutService": {
+      "url": "https://hgchoik.duckdns.org:8443/saml/sls",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+  },
+  "idp": {
+    "entityId": "https://stsds-dev.secsso.net/adfs/services/trust",
+    "singleSignOnService": {
+      "url": "https://stsds-dev.secsso.net/adfs/ls",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "singleLogoutService": {
+      "url": "https://stsds-dev.secsso.net/adfs/ls/?wa=wsignoutcleanup1.0",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "x509cert": "-----BEGIN CERTIFICATE-----\nMIIC3jCCAcagAwIBAgIUQm9nQ29yZVNBTUxJRC1TQU1MT0cwbzANBgkqhkiG9w0B\nAQsFADAVMRMwEQYDVQQDDAppZHAuZXhhbXBsZTAeFw0yNTAxMDEwMDAwMDBaFw0z\nNTAxMDEwMDAwMDBaMBUxEzARBgNVBAMMCmlkcC5leGFtcGxlMIIBIjANBgkqhkiG\n9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx8v3uK2sXxg8S7kZ2m0Gv1mYkqgF7kQH8o0O\n3J0u1m7lZqQmFZk0Wz9d0o8KQK8s3gqP8V4bO0w1vGZbq2k5F0bFq3GZP2w1Q3Y8\n6Jx1uPSiZc5hTt2v1d0+9o8+9QYH9ZQ2xk5hKx2pC8r9m2w5b0Ew1ZlH6qGq4vEw\nQ6gW5eJzVvQ0pQw0Y1wqJb8xwXgO0s2cB5XQ1sG0Y5oKzVJ8k9q2f1oXnq0V2R0x\n2pCj5Ppx3x6Wb6Yy3o2u0Y4J9hG8lqf4nOa0hQJ1kqfH0cZ0l2lZqf2G6o0Vw4bK\n6h5mYy0sJwIDAQABo1MwUTAdBgNVHQ4EFgQULc3tZnNhbXBsZUlEUENlcnQwQWEw\nHwYDVR0jBBgwFoAULc3tZnNhbXBsZUlEUENlcnQwQWEwDwYDVR0TAQH/BAUwAwEB\n/zANBgkqhkiG9w0BAQsFAAOCAQEAIj6g5QKf2mS8zG4Y7t6b0i5h3kGz9Rr5zYxVd\n1rQJx+3Q0yZQkqfZr3G9n2rXk+Y0fV2r8T1uZkNQpG8h5k2uYw5vQj1pQ7t5f1l2r\n9y4w3k2l5m6n7o8p9q0a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w\nx1y2z3A4B5C6D7E8F9G0H1I2J3K4L5M6N7O8P9Q0R1S2T3U4V5W6X7Y8Z9\n-----END CERTIFICATE-----"
+  }
+}
+
+

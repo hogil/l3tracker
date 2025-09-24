@@ -49,7 +49,6 @@ labels/
 *.sqlite
 *.sqlite3
 config.json
-settings.json
 
 # Temporary files
 *.tmp
