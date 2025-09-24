@@ -1,5 +1,26 @@
 # Python
 __pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Logs and runtime artifacts
+logs/**
+*.log
+cookies.txt
+
+# Certificates / secrets (keep local only)
+cert/**
+
+# Node (if present)
+node_modules/
+# Python
+__pycache__/
 *.py[cod]
 *$py.class
 *.so
