@@ -329,6 +329,19 @@
             <button class="btn" onclick="loadStats()">🔄 새로고침</button>
             <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
         </div>
+
+        <!-- 부서별 상위 10 + 비교 차트 -->
+        <div class="stats-section">
+            <h2 class="section-title">🏢 부서별 상위 10 (최근 14일)</h2>
+            <div style="display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start;">
+                <div id="deptTop10" class="user-table" style="max-height: 360px; overflow-y: auto;"></div>
+                <div class="chart-container" style="margin: 0;">
+                    <div class="chart-wrapper" style="height: 300px;">
+                        <canvas id="deptChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <!-- 상단 섹션: 오늘 요약 + 사용자 목록 -->
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; align-items: stretch;">
@@ -444,15 +457,39 @@
 
         function renderDeptBreakdown(data) {
             if (!data || !Array.isArray(data.items)) return;
-            const container = document.getElementById('dailyStats');
-            const top = data.items.slice(0, 4);
-            const html = top.map(([dept, cnt]) => `
-                <div class="stat-card">
-                    <div class="stat-value">${cnt}</div>
-                    <div class="stat-label">부서: ${dept}</div>
-                </div>
-            `).join('');
-            container.insertAdjacentHTML('beforeend', html);
+            // 상위 10 테이블
+            const top10 = data.items.slice(0, 10);
+            const table = document.getElementById('deptTop10');
+            let html = `<div class="table-header">부서 상위 10</div>`;
+            html += `<div class="table-content">`;
+            top10.forEach(([dept, cnt]) => {
+                html += `<div class="user-row" style="grid-template-columns: 1fr 80px;">
+                            <div><span style="color:#8bc34a; font-weight:bold;">${dept}</span></div>
+                            <div style="text-align:right; color:#FF9800; font-weight:bold;">${cnt}</div>
+                         </div>`;
+            });
+            html += `</div>`;
+            table.innerHTML = html;
+
+            // 비교 차트(막대)
+            const labels = data.items.map(([d]) => d);
+            const values = data.items.map(([,c]) => c);
+            const ctx = document.getElementById('deptChart');
+            if (window.deptChartInstance) window.deptChartInstance.destroy();
+            window.deptChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: '요청 수',
+                        data: values,
+                        backgroundColor: 'rgba(139, 195, 74, 0.8)',
+                        borderColor: '#8bc34a',
+                        borderWidth: 1
+                    }]
+                },
+                options: getChartOptions('부서별')
+            });
         }
         
         function renderDailyStats(data) {

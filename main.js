@@ -5335,7 +5335,10 @@ class WaferMapViewer {
             document.documentElement.style.setProperty('--grid-cols', this.gridCols);
         }
         
-        // 파일명 패널은 유지 (제품 변경 시 상단 패널 사라짐 방지)
+        // 단일 이미지 전환 후 그리드로 돌아올 때 상단 파일명 패널은 숨긴다
+        if (this.dom.fileNameDisplay) this.dom.fileNameDisplay.style.display = 'none';
+        if (this.dom.fileNameText) this.dom.fileNameText.textContent = '';
+        if (this.dom.filePathText) this.dom.filePathText.textContent = '';
         
         const viewControls = document.querySelector('.view-controls');
         if (viewControls) viewControls.style.display = 'none';
