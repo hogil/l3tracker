@@ -33,7 +33,7 @@ class ThumbnailManager {
         this.maxCacheSize = 1000; // 캐시 크기 증가
         this.cacheTimeout = 15 * 60 * 1000; // 15분으로 증가
         this.concurrentLoads = 0;
-        this.maxConcurrentLoads = 12; // 동시 로딩 증가
+        this.maxConcurrentLoads = 16; // 기본 동시 로딩 상향 (urgent 시 가변 상향)
         this.loadQueue = [];
         this.viewportQueue = []; // viewport 우선순위 큐
         this.backgroundQueue = []; // 백그라운드 큐
@@ -81,7 +81,10 @@ class ThumbnailManager {
 
     async fetchThumbnail(imgPath) {
         // 동시 로딩 수 제한
-        if (this.concurrentLoads >= this.maxConcurrentLoads) {
+        // 우선순위에 따라 동시 로딩 상한을 가변 적용 (urgent일수록 상향)
+        const isUrgent = (typeof imgPath === 'string' && imgPath.includes('__urgent__'));
+        const dynamicCap = isUrgent ? Math.max(this.maxConcurrentLoads, 16) : this.maxConcurrentLoads;
+        if (this.concurrentLoads >= dynamicCap) {
             await new Promise(resolve => this.loadQueue.push(resolve));
         }
         
@@ -105,6 +108,7 @@ class ThumbnailManager {
 
     // Intersection Observer 설정
     setupIntersectionObserver() {
+        const scrollRoot = document.querySelector('.grid-scroll-wrapper') || document.getElementById('image-grid');
         this.observer = new IntersectionObserver((entries) => {
             // 뷰포트에 들어오는 항목들을 우선순위별로 정렬
             const visibleEntries = entries.filter(entry => entry.isIntersecting);
@@ -117,8 +121,8 @@ class ThumbnailManager {
                     const imgPath = entry.target.getAttribute('data-img-path');
                     if (!imgPath) return;
                     
-                    // 완전히 뷰포트에 들어온 이미지 최우선 처리
-                    const priority = entry.intersectionRatio > 0.5 ? 'urgent' : 'high';
+                    // 가시영역 가까울수록, 위쪽보다는 현재 뷰 우선
+                    const priority = entry.intersectionRatio > 0.4 ? 'urgent' : 'high';
                     this.loadThumbnailAndDisplay(imgPath, entry.target, priority);
                 });
             
@@ -130,9 +134,9 @@ class ThumbnailManager {
                 }
             });
         }, {
-            root: document.getElementById('image-grid'),
-            rootMargin: '100px', // 100px로 줄여서 더 집중적으로 처리
-            threshold: [0, 0.1, 0.25, 0.5, 0.75, 1.0] // 더 세밀한 threshold로 우선순위 결정
+            root: scrollRoot,
+            rootMargin: '200px 0px 400px 0px',
+            threshold: [0, 0.25, 0.5, 0.75, 1.0]
         });
     }
     
@@ -162,9 +166,10 @@ class ThumbnailManager {
     // 스크롤 시 즉시 보이는 이미지들을 감지하고 우선 로드
     checkVisibleThumbnails() {
         const grid = document.getElementById('image-grid');
+        const scrollRoot = document.querySelector('.grid-scroll-wrapper') || grid;
         if (!grid) return;
         
-        const gridRect = grid.getBoundingClientRect();
+        const gridRect = scrollRoot.getBoundingClientRect();
         // 현재 구조에 맞게 선택자 수정: placeholder(data:)가 설정된 항목이 미로드 상태
         const images = grid.querySelectorAll('.grid-thumb-wrap img.grid-thumb-img[data-img-path]');
         
@@ -5653,8 +5658,11 @@ class WaferMapViewer {
         const grid = document.getElementById('image-grid');
         if (!grid) return;
         grid.innerHTML = '';
+        const streamStart = performance.now();
         const total = images.length;
-        const batchSize = 120;
+        // 화면 크기/성능에 따라 배치 크기 동적 조정
+        const hwThreads = (navigator.hardwareConcurrency || 8);
+        const batchSize = Math.min(240, Math.max(60, hwThreads * 20));
         let index = 0;
         const renderBatch = () => {
             if (!this.gridMode) return;
@@ -5708,6 +5716,10 @@ class WaferMapViewer {
             this.thumbnailManager.checkVisibleThumbnails();
             if (index < total) {
                 requestAnimationFrame(renderBatch);
+            } else {
+                const ms = performance.now() - streamStart;
+                const rps = (total / (ms / 1000)).toFixed(1);
+                console.debug(`[THUMB] 스트리밍 완료: ${total}개, ${ms.toFixed(0)}ms (${rps}개/초)`);
             }
         };
         requestAnimationFrame(renderBatch);
@@ -5763,7 +5775,7 @@ class WaferMapViewer {
     async loadAllThumbnailsAtOnce(images) {
         if (images.length === 0) return;
         
-        const startTime = Date.now();
+        const startTime = performance.now();
         
         // 배치 프리로드 (대량 처리 시 자동 분할)
         await this.thumbnailManager.preloadBatch(images);
@@ -5794,10 +5806,9 @@ class WaferMapViewer {
         
         await Promise.allSettled(loadPromises);
         
-        const elapsed = Date.now() - startTime;
-        if (elapsed > 500) { // 500ms 이상일 때만 로그
-            console.log(`썸네일 로딩: ${images.length}개, ${elapsed}ms`);
-        }
+        const elapsedMs = performance.now() - startTime;
+        const perSec = (images.length / (elapsedMs / 1000)).toFixed(1);
+        console.debug(`[THUMB] 완료: ${images.length}개, ${elapsedMs.toFixed(0)}ms (${perSec}개/초)`);
     }
 
     async checkWorkerStats() {

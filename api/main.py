@@ -21,6 +21,11 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
+try:
+    import pyvips
+    _VIPS_AVAILABLE = True
+except Exception:
+    _VIPS_AVAILABLE = False
 import http.client
 import urllib.parse
 
@@ -260,6 +265,7 @@ LABELS_FILE = config.LABELS_FILE
 # ======================== Pools / State / Caches ========================
 IO_POOL = ThreadPoolExecutor(max_workers=IO_THREADS)
 THUMBNAIL_SEM = asyncio.Semaphore(THUMBNAIL_SEM_SIZE)
+THUMB_EXECUTOR = ThreadPoolExecutor(max_workers=IO_THREADS)
 
 USER_ACTIVITY_FLAG = False
 BACKGROUND_TASKS_PAUSED = False
@@ -964,10 +970,42 @@ async def build_file_index_background():
 
 # ======================== Thumbnails / Common ========================
 def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple[int, int]):
+    """고품질 512px 썸네일 생성. pyvips가 있으면 우선 사용(shrink-on-load), 없으면 Pillow.
+    품질: PNG는 무손실, WEBP는 lossless 저장.
+    """
     thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+    fmt = THUMBNAIL_FORMAT.upper()
+    width = int(size[0]); height = int(size[1])
+
+    if _VIPS_AVAILABLE:
+        try:
+            # pyvips는 축소 시 고속/고품질. 썸네일은 가로 기준 축소 후 fit.
+            vimg = pyvips.Image.thumbnail(str(image_path), width, height=height, size=pyvips.enums.Size.BOTH)
+            if fmt == "WEBP":
+                vimg.write_to_file(str(thumbnail_path), lossless=True)  # 무손실 WebP
+            elif fmt == "PNG":
+                vimg.write_to_file(str(thumbnail_path))
+            else:
+                # 기타 포맷은 품질 100으로 저장 (가능한 경우)
+                vimg.write_to_file(str(thumbnail_path))
+            return
+        except Exception:
+            # vips 실패 시 Pillow로 폴백
+            pass
+
+    # Pillow 경로(무손실 보장)
     with Image.open(image_path) as img:
-        img.thumbnail(size, Image.Resampling.LANCZOS)
-        img.save(thumbnail_path, THUMBNAIL_FORMAT.upper(), quality=THUMBNAIL_QUALITY, optimize=True)
+        img.thumbnail((width, height), Image.Resampling.LANCZOS)
+        save_kwargs = {"optimize": True}
+        if fmt == "WEBP":
+            # Pillow WebP 무손실 저장
+            save_kwargs.update({"lossless": True, "quality": 100, "method": 6})
+        elif fmt == "PNG":
+            # PNG는 기본 무손실
+            pass
+        else:
+            save_kwargs.update({"quality": THUMBNAIL_QUALITY})
+        img.save(thumbnail_path, fmt, **save_kwargs)
 
 async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     thumb = get_thumbnail_path(image_path, size)
@@ -990,9 +1028,8 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
         if thumb.exists():
             try: thumb.unlink()
             except Exception as e: logger.warning(f"기존 썸네일 삭제 실패: {thumb}, 오류: {e}")
-        await asyncio.get_running_loop().run_in_executor(
-            ThreadPoolExecutor(max_workers=1), _generate_thumbnail_sync, image_path, thumb, size
-        )
+        # 전역 변환 풀에서 실행 (IO_THREADS)
+        await asyncio.get_running_loop().run_in_executor(THUMB_EXECUTOR, _generate_thumbnail_sync, image_path, thumb, size)
         THUMB_STAT_CACHE.set(key, True)
         return thumb
 
