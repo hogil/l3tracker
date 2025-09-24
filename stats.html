@@ -325,15 +325,15 @@
             <p>실시간 사용자 접속 현황 및 시각적 트렌드 분석</p>
         </div>
         
-        <!-- 상단: 버튼과 오늘 요약을 같은 줄에 배치 -->
+        <!-- 상단: 버튼들을 세로로 배치하고, 오늘 요약을 가로로 배치 -->
         <div style="display: flex; gap: 20px; margin-bottom: 30px; align-items: flex-start;">
-            <div class="controls" style="flex-shrink: 0;">
-                <button class="btn" onclick="loadStats()">🔄 새로고침</button>
-                <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
+            <div style="display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
+                <button class="btn" onclick="loadStats()" style="width: 120px; height: 45px;">🔄 새로고침</button>
+                <button class="btn secondary" onclick="exportStats()" style="width: 120px; height: 45px;">📥 통계 내보내기</button>
             </div>
             <div class="stats-section" style="flex: 1;">
                 <h2 class="section-title" style="font-size: 1.3rem; margin-bottom: 10px;">📋 오늘 요약</h2>
-                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(4, 1fr); height: 120px; align-content: start; font-size: 0.85em;">
+                <div class="stats-grid" id="dailyStats" style="grid-template-columns: repeat(4, 1fr); height: 80px; align-content: start; font-size: 0.8em;">
                     <div class="loading">통계 로딩 중...</div>
                 </div>
             </div>
@@ -730,9 +730,7 @@
             `;
             
             users.forEach(user => {
-                const dept = user.department ? ` <span style="color:#8bc34a;">(${user.department})</span>` : '';
-                const position = user.position ? ` <span style="color:#9c27b0;">[${user.position}]</span>` : '';
-                const displayName = (user.display_name || user.user_id) + dept + position;
+                const displayName = user.display_name || user.user_id;
                 
                 html += `
                     <div class="clickable" ondblclick="showUserDetail('${user.user_id}')" style="display: grid; grid-template-columns: 1fr 80px 60px 80px; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #333; font-size: 0.85em; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#2a2a2a'" onmouseout="this.style.backgroundColor='transparent'">
@@ -766,9 +764,7 @@
             `;
             
             recentUsers.forEach(user => {
-                const dept = user.department ? ` <span style=\"color:#8bc34a;\">(${user.department})</span>` : '';
-                const position = user.position ? ` <span style=\"color:#9c27b0;\">[${user.position}]</span>` : '';
-                const displayName = (user.display_name || user.user_id) + dept + position;
+                const displayName = user.display_name || user.user_id;
                 
                 // last_access가 날짜만 있는 경우와 타임스탬프가 있는 경우 구분
                 const lastAccess = formatDateTime(user.last_access);

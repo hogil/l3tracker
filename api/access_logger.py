@@ -688,12 +688,13 @@ class AccessLogger:
             user_data["total_session_time"] += int(session_duration)
             
             # 세션 히스토리 업데이트
-            for session_info in user_data["sessions"]:
-                if session_info["session_id"] == session["session_id"]:
-                    session_info["end_time"] = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
-                    session_info["duration"] = int(session_duration)
-                    session_info["request_count"] = session["request_count"]
-                    break
+            if "sessions" in user_data:
+                for session_info in user_data["sessions"]:
+                    if session_info["session_id"] == session["session_id"]:
+                        session_info["end_time"] = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+                        session_info["duration"] = int(session_duration)
+                        session_info["request_count"] = session["request_count"]
+                        break
     
     def get_active_users(self) -> Dict[str, Any]:
         """현재 활성 사용자 정보"""
@@ -865,12 +866,22 @@ class AccessLogger:
                 "current_session_start": data.get("current_session_start", "Unknown")
             })
         
-        # 총 요청 수로 정렬
-        users.sort(key=lambda x: x["total_requests"], reverse=True)
+        # 접속일수 내림차순 → 마지막 접속일 내림차순
+        def _parse_access_time(access_time_str: str) -> float:
+            try:
+                # ISO 또는 'YYYY-MM-DD HH:MM:SS'
+                try:
+                    return datetime.fromisoformat(access_time_str.replace('Z','')).timestamp()
+                except Exception:
+                    return datetime.strptime(access_time_str, "%Y-%m-%d %H:%M:%S").timestamp()
+            except Exception:
+                return 0.0
+        
+        users.sort(key=lambda x: (x["unique_days"], _parse_access_time(x["last_access_time"])), reverse=True)
         
         return {
             "total_users": len(users),
-            "users": users[:50]  # 상위 50명
+            "users": users  # 전체 사용자
         }
 
     def get_breakdown_stats(self, category: str = "department", days: int = 7) -> Dict[str, Any]:
@@ -892,64 +903,62 @@ class AccessLogger:
         return {"category": category, "days": days, "items": items}
     
     def get_recent_users(self) -> Dict[str, Any]:
-        """최근 24시간 활성 사용자"""
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        today = datetime.now().strftime('%Y-%m-%d')
+        """모든 사용자 (마지막 접속순 내림차순)"""
         
         recent_users = []
         for user_id, data in self.stats_data["users"].items():
             # localhost IP 제외
             if user_id in ['127.0.0.1', '::1', 'localhost']:
                 continue
-            if data["last_seen"] >= yesterday:
-                # 실제 저장된 마지막 접속 시간 사용
-                last_access = data.get("last_access_time", data["last_seen"])
-                
-                # 사용자 프로필 정보 추출 (사내 claim 우선)
-                profile = data.get("profile", {})
-                # 계정: LoginId > employee_id > login_id > account > user_id
-                account = (profile.get("login_id") or profile.get("employee_id") or 
-                          profile.get("account") or profile.get("LoginId") or 
-                          profile.get("name") or user_id)
-                # 이름: Username > username > name
-                name = (profile.get("Username") or profile.get("username") or 
-                       profile.get("name") or profile.get("display_name") or "")
-                # 부서: DeptName > department_name > department
-                department = (profile.get("DeptName") or profile.get("department_name") or 
-                             profile.get("department", ""))
-                # 직급: GrdName_EN > position
-                position = (profile.get("GrdName_EN") or profile.get("position", ""))
-                
-                # 디스플레이명 구성: "계정 | 이름(직급) | 부서 | IP"
-                display_parts = []
-                # 계정 정보가 있으면 추가
-                if account and account != user_id:
-                    display_parts.append(account)
-                # 이름 정보가 있으면 추가 (직급 포함)
-                if name and name != account:
-                    name_with_position = name
-                    if position:
-                        name_with_position = f"{name}({position})"
-                    display_parts.append(name_with_position)
-                # 부서 정보가 있으면 추가
-                if department:
-                    display_parts.append(department)
-                # 항상 IP 추가
-                display_parts.append(data["primary_ip"])
-                
-                # 항상 format된 문자열 사용 (최소한 IP는 포함)
-                display_name = " | ".join(display_parts)
-                
-                recent_users.append({
-                    "user_id": user_id,
-                    "display_name": display_name,
-                    "primary_ip": data["primary_ip"],
-                    "total_requests": data.get("daily_requests", {}).get(today, 0),
-                    "last_access": last_access,
-                    "name": name,
-                    "department": department,
-                    "position": position
-                })
+            
+            # 실제 저장된 마지막 접속 시간 사용
+            last_access = data.get("last_access_time", data["last_seen"])
+            
+            # 사용자 프로필 정보 추출 (사내 claim 우선)
+            profile = data.get("profile", {})
+            # 계정: LoginId > employee_id > login_id > account > user_id
+            account = (profile.get("login_id") or profile.get("employee_id") or 
+                      profile.get("account") or profile.get("LoginId") or 
+                      profile.get("name") or user_id)
+            # 이름: Username > username > name
+            name = (profile.get("Username") or profile.get("username") or 
+                   profile.get("name") or profile.get("display_name") or "")
+            # 부서: DeptName > department_name > department
+            department = (profile.get("DeptName") or profile.get("department_name") or 
+                         profile.get("department", ""))
+            # 직급: GrdName_EN > position
+            position = (profile.get("GrdName_EN") or profile.get("position", ""))
+            
+            # 디스플레이명 구성: "계정 | 이름(직급) | 부서 | IP"
+            display_parts = []
+            # 계정 정보가 있으면 추가
+            if account and account != user_id:
+                display_parts.append(account)
+            # 이름 정보가 있으면 추가 (직급 포함)
+            if name and name != account:
+                name_with_position = name
+                if position:
+                    name_with_position = f"{name}({position})"
+                display_parts.append(name_with_position)
+            # 부서 정보가 있으면 추가
+            if department:
+                display_parts.append(department)
+            # 항상 IP 추가
+            display_parts.append(data["primary_ip"])
+            
+            # 항상 format된 문자열 사용 (최소한 IP는 포함)
+            display_name = " | ".join(display_parts)
+            
+            recent_users.append({
+                "user_id": user_id,
+                "display_name": display_name,
+                "primary_ip": data["primary_ip"],
+                "total_requests": data["total_requests"],  # 전체 요청수 사용
+                "last_access": last_access,
+                "name": name,
+                "department": department,
+                "position": position
+            })
         
         # 마지막 접속 시간으로 정렬 (최신 순, 안정 정렬)
         def _parse_ts(val: str) -> float:
@@ -965,11 +974,11 @@ class AccessLogger:
                     return datetime.strptime(val, "%Y-%m-%d").timestamp()
                 except Exception:
                     return 0.0
-        recent_users.sort(key=lambda x: (-_parse_ts(x.get("last_access", "1970-01-01")), x.get("user_id", "")))
+        recent_users.sort(key=lambda x: (-_parse_ts(x.get("last_access", "1970-01-01")), -x.get("total_requests", 0)))
         
         return {
             "total_recent": len(recent_users),
-            "recent_users": recent_users[:20]  # 상위 20명
+            "recent_users": recent_users  # 전체 사용자
         }
     
     def get_user_detail(self, user_id: str) -> Optional[Dict[str, Any]]:
