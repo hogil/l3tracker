@@ -3,7 +3,7 @@ L3Tracker - Wafer Map Viewer API (HTTPS, Pretty Table Logs, Noise-free)
 """
 
 # ======================== Imports ========================
-import os, re, sys, json, time, shutil, asyncio, logging, logging.config
+import os, re, sys, json, time, shutil, asyncio, logging, logging.config, hashlib
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from collections import OrderedDict
@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 
-from fastapi import FastAPI, HTTPException, Query, Request, Path as PathParam, Depends
+from fastapi import FastAPI, HTTPException, Query, Request, Path as PathParam, Depends, Body
 from fastapi import Response as FastAPIResponse
 from fastapi.responses import JSONResponse, FileResponse, Response, RedirectResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -265,7 +265,23 @@ LABELS_FILE = config.LABELS_FILE
 # ======================== Pools / State / Caches ========================
 IO_POOL = ThreadPoolExecutor(max_workers=IO_THREADS)
 THUMBNAIL_SEM = asyncio.Semaphore(THUMBNAIL_SEM_SIZE)
-THUMB_EXECUTOR = ThreadPoolExecutor(max_workers=IO_THREADS)
+# 썸네일 전용 풀: 고속 배치 처리를 위해 더 많이
+THUMB_EXECUTOR = ThreadPoolExecutor(max_workers=THUMBNAIL_SEM_SIZE)
+
+# 썸네일 인플라이트 중복 제거용 맵
+THUMB_INFLIGHT: Dict[str, asyncio.Future] = {}
+THUMB_INFLIGHT_LOCK = RLock()
+
+# 고속 생성용: pyvips 인스턴스 풀 (메모리 재사용)
+VIPS_INSTANCE_POOL = []  # 메모리 효율성을 위한 인스턴스 풀
+
+# 대량 처리용 성능 카운터
+THUMBNAIL_PERF = {
+    "total_generated": 0,
+    "pyvips_count": 0,
+    "pillow_count": 0,
+    "total_time": 0.0
+}
 
 USER_ACTIVITY_FLAG = False
 BACKGROUND_TASKS_PAUSED = False
@@ -327,6 +343,7 @@ class TTLCache:
         with self._lock: self._data.clear()
 
 THUMB_STAT_CACHE = TTLCache(THUMB_STAT_TTL_SECONDS, THUMB_STAT_CACHE_CAPACITY)
+THUMB_BACKEND: Dict[str, str] = {}
 
 # ======================== FastAPI & Middleware ========================
 app = FastAPI(title="L3Tracker API", version="2.6.0")
@@ -732,8 +749,11 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
         if any(endpoint.startswith(p) for p in skip_prefix):
             return response
 
-        if endpoint.startswith(("/api/thumbnail", "/api/image")):
-            tag = "IMAGE"
+        if endpoint.startswith("/api/thumbnail"):
+            # 썸네일 요청은 로그 억제 (너무 많음)
+            tag = None  # 로그 비활성화
+        elif endpoint.startswith("/api/image"):
+            tag = "IMAGE" 
         elif endpoint.startswith("/api/classify"):
             tag = "ACTION"
         else:
@@ -756,7 +776,9 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
             if bits:
                 note = (note + " ").strip() + f"[{ ' / '.join(bits) }]"
         # IP 칼럼에 계정(username@hostname) 우선 표시
-        log_access_row(tag=tag, ip=display_user, method=method, status=status, path=endpoint, note=note)
+        # 썸네일 요청은 로그 억제 (tag=None인 경우)
+        if tag is not None:
+            log_access_row(tag=tag, ip=display_user, method=method, status=status, path=endpoint, note=note)
         return response
 
 app.add_middleware(AccessTrackingMiddleware)
@@ -769,12 +791,15 @@ def is_supported_image(path: Path) -> bool:
 
 def get_thumbnail_path(image_path: Path, size: Tuple[int, int]) -> Path:
     relative_path = image_path.relative_to(ROOT_DIR)
-    # 플랫 구조 + 안전한 파일명: 경로 구분자/제어문자/따옴표 등 비허용 문자를 '_'로 치환
+    # 안전 문자열화 후 해시 서브폴더(ab/cd)
     safe = str(relative_path).replace('\\', '/')
     safe = re.sub(r"[^A-Za-z0-9._\-\/]", "_", safe)
-    path_hash = safe.replace('/', '_')
-    thumbnail_name = f"{path_hash}_{size[0]}x{size[1]}.{THUMBNAIL_FORMAT.lower()}"
-    return THUMBNAIL_DIR / thumbnail_name
+    sha1 = hashlib.sha1(safe.encode("utf-8")).hexdigest()
+    sub_a, sub_b = sha1[:2], sha1[2:4]
+    base_name = Path(safe).name
+    stem = Path(base_name).stem
+    thumbnail_name = f"{stem}_{size[0]}x{size[1]}.{THUMBNAIL_FORMAT.lower()}"
+    return THUMBNAIL_DIR / sub_a / sub_b / thumbnail_name
 
 def safe_resolve_path(path: Optional[str]) -> Path:
     if not path: return ROOT_DIR
@@ -969,26 +994,50 @@ async def build_file_index_background():
         INDEX_BUILDING = False
 
 # ======================== Thumbnails / Common ========================
-def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple[int, int]):
-    """고품질 512px 썸네일 생성. pyvips가 있으면 우선 사용(shrink-on-load), 없으면 Pillow.
-    품질: PNG는 무손실, WEBP는 lossless 저장.
-    """
+def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple[int, int]) -> str:
+    """최고속 썸네일 생성. pyvips 우선 + 성능 최적화"""
+    start_time = time.time()
     thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
     fmt = THUMBNAIL_FORMAT.upper()
     width = int(size[0]); height = int(size[1])
+    
+    # 전역 성능 카운터 업데이트
+    global THUMBNAIL_PERF
+    THUMBNAIL_PERF["total_generated"] += 1
 
     if _VIPS_AVAILABLE:
         try:
-            # pyvips는 축소 시 고속/고품질. 썸네일은 가로 기준 축소 후 fit.
-            vimg = pyvips.Image.thumbnail(str(image_path), width, height=height, size=pyvips.enums.Size.BOTH)
+            # pyvips 최고속: 메모리 최소 + 처리 속도 극대화
+            vimg = pyvips.Image.thumbnail(
+                str(image_path), width, height=height,
+                size=pyvips.enums.Size.BOTH,
+                auto_rotate=False,  # EXIF 회전 비활성화 (속도++)
+                linear=False,       # 빠른 보간 (품질<속도)
+                no_profile=True,    # 색상 프로필 제거 (속도++)
+                crop=pyvips.enums.Interesting.CENTRE,
+                intent=pyvips.enums.Intent.RELATIVE  # 기본 인텐트
+            )
+                
             if fmt == "WEBP":
-                vimg.write_to_file(str(thumbnail_path), lossless=True)  # 무손실 WebP
+                # 최고속 WebP: 최소 압축 노력 + 메타데이터 제거
+                vimg.write_to_file(
+                    str(thumbnail_path), 
+                    Q=82,           # 적당한 품질
+                    effort=0,       # 최소 압축 노력 (속도 최우선)
+                    lossless=False, # 손실 압축 (속도++)
+                    strip=True,     # 메타데이터 제거
+                    background=[255, 255, 255]  # 배경색 설정
+                )
             elif fmt == "PNG":
-                vimg.write_to_file(str(thumbnail_path))
+                # 최고속 PNG: 압축 비활성화
+                vimg.write_to_file(str(thumbnail_path), compression=0, strip=True)
             else:
-                # 기타 포맷은 품질 100으로 저장 (가능한 경우)
-                vimg.write_to_file(str(thumbnail_path))
-            return
+                vimg.write_to_file(str(thumbnail_path), strip=True)
+            
+            elapsed = time.time() - start_time
+            THUMBNAIL_PERF["pyvips_count"] += 1
+            THUMBNAIL_PERF["total_time"] += elapsed
+            return "pyvips-ultra"
         except Exception:
             # vips 실패 시 Pillow로 폴백
             pass
@@ -1006,6 +1055,10 @@ def _generate_thumbnail_sync(image_path: Path, thumbnail_path: Path, size: Tuple
         else:
             save_kwargs.update({"quality": THUMBNAIL_QUALITY})
         img.save(thumbnail_path, fmt, **save_kwargs)
+        elapsed = time.time() - start_time
+        THUMBNAIL_PERF["pillow_count"] += 1
+        THUMBNAIL_PERF["total_time"] += elapsed
+        return "pillow"
 
 async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     thumb = get_thumbnail_path(image_path, size)
@@ -1022,16 +1075,37 @@ async def generate_thumbnail(image_path: Path, size: Tuple[int, int]) -> Path:
     if cached:
         THUMB_STAT_CACHE.set(key, True);  return thumb
 
-    async with THUMBNAIL_SEM:
-        if thumb.exists() and thumb.stat().st_size > 0 and thumb.stat().st_mtime >= image_mtime:
-            THUMB_STAT_CACHE.set(key, True);  return thumb
-        if thumb.exists():
-            try: thumb.unlink()
-            except Exception as e: logger.warning(f"기존 썸네일 삭제 실패: {thumb}, 오류: {e}")
-        # 전역 변환 풀에서 실행 (IO_THREADS)
-        await asyncio.get_running_loop().run_in_executor(THUMB_EXECUTOR, _generate_thumbnail_sync, image_path, thumb, size)
-        THUMB_STAT_CACHE.set(key, True)
-        return thumb
+    # 인플라이트 중복 제거: 동일 key 작업 합치기
+    with THUMB_INFLIGHT_LOCK:
+        existing = THUMB_INFLIGHT.get(key)
+        if existing is not None:
+            # 이미 생성 중이면 그 결과를 기다린다
+            return await existing
+        fut = asyncio.get_running_loop().create_future()
+        THUMB_INFLIGHT[key] = fut
+
+    try:
+        async with THUMBNAIL_SEM:
+            if thumb.exists() and thumb.stat().st_size > 0 and thumb.stat().st_mtime >= image_mtime:
+                THUMB_STAT_CACHE.set(key, True)
+                if not fut.done():
+                    fut.set_result(thumb)
+                return thumb
+            if thumb.exists():
+                try:
+                    thumb.unlink()
+                except Exception as e:
+                    logger.warning(f"기존 썸네일 삭제 실패: {thumb}, 오류: {e}")
+            # 전역 변환 풀에서 실행 (IO_THREADS)
+            backend = await asyncio.get_running_loop().run_in_executor(THUMB_EXECUTOR, _generate_thumbnail_sync, image_path, thumb, size)
+            THUMB_STAT_CACHE.set(key, True)
+            THUMB_BACKEND[key] = backend
+            if not fut.done():
+                fut.set_result(thumb)
+            return thumb
+    finally:
+        with THUMB_INFLIGHT_LOCK:
+            THUMB_INFLIGHT.pop(key, None)
 
 def maybe_304(request: Request, st) -> Optional[Response]:
     etag = compute_etag(st)
@@ -1219,7 +1293,7 @@ async def get_image(request: Request, path: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/thumbnail")
-async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_DEFAULT):
+async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_DEFAULT, refresh: int = 0):
     try:
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
@@ -1227,15 +1301,157 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
         # 이미지가 아니면 원본 파일을 썸네일로 제공하지 않음. 단, 확장자 오인으로 200을 주지 않도록 415 처리
         if not is_supported_image(image_path):
             raise HTTPException(status_code=415, detail="Unsupported image format")
+        # 대량 배치 처리용: 동시성 제한 완화 (고속 모드)
+        global THUMBNAIL_SEM
+        batch_mode = request.query_params.get("batch", "").lower() == "true"
+        if batch_mode:
+            # 배치 모드: 최대 동시성으로 처리
+            THUMBNAIL_SEM = asyncio.Semaphore(THUMBNAIL_SEM_SIZE)
+        elif USER_ACTIVITY_FLAG and THUMBNAIL_SEM._value > max(4, THUMBNAIL_SEM_SIZE // 4):
+            THUMBNAIL_SEM = asyncio.Semaphore(max(4, THUMBNAIL_SEM_SIZE // 4))
+
+        # 강제 재생성 옵션: 기존 썸네일 제거
+        thumb = get_thumbnail_path(image_path, (size, size))
+        if refresh:
+            try:
+                if thumb.exists():
+                    thumb.unlink()
+            except Exception:
+                pass
+        # 생성/재사용
         thumb = await generate_thumbnail(image_path, (size, size))
         st = thumb.stat()
         resp_304 = maybe_304(request, st)
         if resp_304: return resp_304
         headers = {"Cache-Control": "public, max-age=604800, immutable", "ETag": compute_etag(st)}
-        return FileResponse(thumb, headers=headers)
+        # FileResponse 생성 후 헤더 직접 주입(미들웨어와 충돌 방지)
+        resp = FileResponse(thumb)
+        for k, v in headers.items():
+            resp.headers[k] = v
+        key = f"{thumb}|{size}x{size}"
+        backend = THUMB_BACKEND.get(key, "cache")
+        resp.headers["X-Thumb-Backend"] = backend
+        # 디버그 로깅 축소: 배치 모드에서만 로그 출력
+        if backend != "cache" and batch_mode:
+            backend_name = "PyVips" if "vips" in backend else "Pillow"
+            # 10개마다 1번만 로그 출력 (스팸 방지)
+            if hash(path) % 10 == 0:
+                log_access_row(
+                    tag="THUMB-DEBUG", 
+                    note=f"{size}px via {backend_name} - batch processing", 
+                    session_id="debug",
+                    path=f"sample: {path[:30]}..."
+                )
+        return resp
     except Exception as e:
         logger.exception(f"썸네일 제공 실패: {e}")
         return await get_image(request, path)
+
+@app.post("/api/thumbnails/batch")
+async def generate_thumbnails_batch(
+    request: Request, 
+    paths: List[str], 
+    size: int = THUMBNAIL_SIZE_DEFAULT,
+    max_concurrent: int = None
+):
+    """초고속 배치 썸네일 생성 API
+    사용법: POST /api/thumbnails/batch
+    Body: ["path1.jpg", "path2.png", ...]
+    Query: ?size=512&max_concurrent=64
+    """
+    if not paths:
+        return JSONResponse({"success": True, "results": [], "stats": {"total": 0, "generated": 0}})
+    
+    # 최대 동시성 설정: 경량급 vs 대량 배치 자동 조절
+    if len(paths) > 1000:
+        # 대량 배치: 동시성 극대화
+        max_concurrent = max_concurrent or min(THUMBNAIL_SEM_SIZE * 2, 256)
+    else:
+        # 소량 배치: 안정성 우선
+        max_concurrent = max_concurrent or THUMBNAIL_SEM_SIZE
+    
+    concurrent_sem = asyncio.Semaphore(min(max_concurrent, len(paths)))
+    
+    start_time = time.time()
+    results = []
+    generated_count = 0
+    cached_count = 0
+    
+    async def process_single(path_str: str):
+        nonlocal generated_count, cached_count
+        try:
+            async with concurrent_sem:
+                image_path = safe_resolve_path(path_str)
+                if not image_path.exists() or not is_supported_image(image_path):
+                    return {"path": path_str, "success": False, "error": "Invalid image"}
+                
+                # 기존 썸네일 확인
+                thumb = get_thumbnail_path(image_path, (size, size))
+                if thumb.exists() and thumb.stat().st_size > 0:
+                    try:
+                        if thumb.stat().st_mtime >= image_path.stat().st_mtime:
+                            cached_count += 1
+                            return {"path": path_str, "success": True, "backend": "cache"}
+                    except Exception:
+                        pass
+                
+                # 새로 생성
+                backend = await asyncio.get_running_loop().run_in_executor(
+                    THUMB_EXECUTOR, 
+                    _generate_thumbnail_sync, 
+                    image_path, 
+                    thumb, 
+                    (size, size)
+                )
+                generated_count += 1
+                return {"path": path_str, "success": True, "backend": backend}
+                
+        except Exception as e:
+            return {"path": path_str, "success": False, "error": str(e)}
+    
+    # 모든 작업을 동시에 시작
+    tasks = [process_single(path_str) for path_str in paths]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 예외 처리
+    final_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            final_results.append({
+                "path": paths[i], 
+                "success": False, 
+                "error": str(result)
+            })
+        else:
+            final_results.append(result)
+    
+    elapsed = time.time() - start_time
+    throughput = len(paths) / elapsed if elapsed > 0 else 0
+    
+    # 로깅 + 성능 통계
+    pyvips_pct = (THUMBNAIL_PERF["pyvips_count"] / max(1, THUMBNAIL_PERF["total_generated"])) * 100
+    avg_time_per_img = THUMBNAIL_PERF["total_time"] / max(1, THUMBNAIL_PERF["total_generated"])
+    
+    log_access_row(
+        tag="BATCH-PERF",
+        note=f"Generated {generated_count}/{len(paths)} in {elapsed:.2f}s ({throughput:.0f}/s) | PyVips: {THUMBNAIL_PERF['pyvips_count']} ({pyvips_pct:.0f}%) | Avg: {avg_time_per_img*1000:.1f}ms",
+        session_id="perf",
+        path=f"batch_{len(paths)}_ultra"
+    )
+    
+    return JSONResponse({
+        "success": True,
+        "results": final_results,
+        "stats": {
+            "total": len(paths),
+            "generated": generated_count,
+            "cached": cached_count,
+            "failed": len(paths) - generated_count - cached_count,
+            "elapsed_seconds": elapsed,
+            "throughput_per_second": throughput,
+            "max_concurrent": max_concurrent
+        }
+    })
 
 @app.get("/api/search")
 async def search_files(q: str = Query(..., description="파일명 검색(대소문자 무시, 부분일치)"),

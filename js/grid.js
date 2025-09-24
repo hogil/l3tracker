@@ -79,6 +79,14 @@ export class GridManager {
         
         // 키보드 이벤트
         document.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        
+        // 디버그 전용: Shift+P로 모든 썸네일 사전 생성
+        document.addEventListener('keydown', (e) => {
+            if (e.shiftKey && e.key === 'P' && this.viewer.gridMode) {
+                e.preventDefault();
+                this.preloadAllThumbnails();
+            }
+        });
     }
     
     /**
@@ -355,6 +363,35 @@ export class GridManager {
         this.currentImages = [];
         this.selectedIndices = [];
         this.loadingThumbnails.clear();
+    }
+    
+    /**
+     * 모든 썸네일 사전 생성 (디버그용)
+     */
+    async preloadAllThumbnails() {
+        if (this.currentImages.length === 0) return;
+        
+        const startTime = performance.now();
+        console.log(`사전 로드 시작: ${this.currentImages.length}개 이미지`);
+        
+        try {
+            const response = await fetch('/api/thumbnails/batch?max_concurrent=128', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(this.currentImages)
+            });
+            
+            const result = await response.json();
+            const elapsed = (performance.now() - startTime) / 1000;
+            
+            console.log(`사전 로드 완료: ${result.stats.throughput_per_second.toFixed(0)}/s (총 ${elapsed.toFixed(1)}s)`);
+            console.log(`- 생성: ${result.stats.generated}개, 캐시: ${result.stats.cached}개, 실패: ${result.stats.failed}개`);
+            
+        } catch (error) {
+            console.error('사전 로드 실패:', error);
+        }
     }
     
     /**

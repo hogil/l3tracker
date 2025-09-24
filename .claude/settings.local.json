@@ -22,7 +22,8 @@
       "Bash(del logsdetailed_access.csv)",
       "Bash(dir:*)",
       "Bash(del:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash($env:PATH = \"C:\\vips-dev-8.17\\bin;$env:PATH\")"
     ],
     "deny": [],
     "ask": []
