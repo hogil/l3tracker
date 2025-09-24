@@ -633,7 +633,7 @@
                         labels: {
                             color: '#ffffff',
                             font: {
-                                size: 11
+                                size: 9
                             }
                         }
                     },
@@ -652,7 +652,7 @@
                         ticks: {
                             color: '#aaaaaa',
                             font: {
-                                size: 10
+                                size: 9
                             }
                         },
                         grid: {
@@ -666,8 +666,10 @@
                         ticks: {
                             color: '#aaaaaa',
                             font: {
-                                size: 10
-                            }
+                                size: 9
+                            },
+                            stepSize: 1,
+                            precision: 0
                         },
                         grid: {
                             color: 'rgba(255, 255, 255, 0.1)'
@@ -746,7 +748,7 @@
                         <div style="text-align: center; color: #E1BEE7; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${nameWithPosition}</div>
                         <div style="text-align: center; color: #64B5F6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${department}</div>
                         <div style="text-align: center; color: #FF9800; font-weight: bold;">${user.total_requests}</div>
-                        <div style="text-align: center; font-size: 0.8em; color: #81C784;">${formatDateTime(user.last_access_time)}</div>
+                        <div style="text-align: center; font-size: 0.9em; color: #81C784; font-weight: bold;">${formatDateTime(user.last_access_time)}</div>
                     </div>
                 `;
             });
@@ -791,7 +793,7 @@
                         <div style="text-align: center; color: #E1BEE7; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${nameWithPosition}</div>
                         <div style="text-align: center; color: #64B5F6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${department}</div>
                         <div style="text-align: center; color: #FF9800; font-weight: bold;">${user.total_requests}</div>
-                        <div style="text-align: center; font-size: 0.8em; color: #81C784;">${lastAccess}</div>
+                        <div style="text-align: center; font-size: 0.9em; color: #81C784; font-weight: bold;">${lastAccess}</div>
                     </div>
                 `;
             });
@@ -926,7 +928,8 @@
                 day: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit',
-                second: '2-digit'
+                second: '2-digit',
+                hour12: false
             });
         }
         
