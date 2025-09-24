@@ -330,19 +330,6 @@
             <button class="btn secondary" onclick="exportStats()">📥 통계 내보내기</button>
         </div>
 
-        <!-- 부서별 상위 10 + 비교 차트 -->
-        <div class="stats-section">
-            <h2 class="section-title">🏢 부서별 상위 10 (최근 14일)</h2>
-            <div style="display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start;">
-                <div id="deptTop10" class="user-table" style="max-height: 360px; overflow-y: auto;"></div>
-                <div class="chart-container" style="margin: 0;">
-                    <div class="chart-wrapper" style="height: 300px;">
-                        <canvas id="deptChart"></canvas>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
         <!-- 상단 섹션: 오늘 요약 + 사용자 목록 -->
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; align-items: stretch;">
             <div class="stats-section">
@@ -393,6 +380,25 @@
                 <div class="chart-container" style="margin-bottom: 0;">
                     <div class="chart-wrapper" style="height: 300px;">
                         <canvas id="monthlyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 부서별 상위 10 + 비교 차트 (하단) -->
+        <div class="stats-section">
+            <h2 class="section-title">🏢 부서별 상위 10 (최근 14일)</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+                <div>
+                    <h3 style="color: #4CAF50; margin-bottom: 15px; font-size: 1.2rem;">📊 상위 10 부서</h3>
+                    <div id="deptTop10" class="user-table" style="max-height: 400px; overflow-y: auto;"></div>
+                </div>
+                <div>
+                    <h3 style="color: #4CAF50; margin-bottom: 15px; font-size: 1.2rem;">📈 전체 부서 비교</h3>
+                    <div class="chart-container" style="margin: 0;">
+                        <div class="chart-wrapper" style="height: 350px;">
+                            <canvas id="deptChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
