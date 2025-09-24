@@ -528,14 +528,19 @@ async def saml_acs(request: Request):
             "title": pick("title", "Title", "GrdName", "GrdName_EN"),
             "email": pick("email", "Email", "mail"),
             "name": pick("name", "Name", "displayName", "cn", "Username"),
-            # 사내 전용 필드들 보존
-            "login_id": pick("LoginId"),
+            # 사내 전용 필드들 (정확한 claim명 매핑)
+            "login_id": pick("LoginId", "LginId"),  # LginId는 오타일 수 있지만 지원 (계정)
             "department_id": pick("DeptId"),
-            "employee_id": pick("employeeId", "Sabun"),
-            "department_name": pick("DeptName"),
-            "grade": pick("GrdName"),
-            "grade_en": pick("GrdName_EN"),
-            "username": pick("Username"),
+            "employee_id": pick("employeeId", "Sabun"),  # Sabun = 사번
+            "department_name": pick("DeptName"),  # DeptName = 부서명
+            "grade": pick("GrdName"),  # GrdName = 담당업무
+            "grade_en": pick("GrdName_EN"),  # GrdName_EN = 직급
+            "username": pick("Username"),  # Username = 이름 (필수)
+            # Username을 기본 name 필드로도 사용
+            "display_name": pick("Username", "name", "Name", "displayName", "cn"),
+            # MS Azure AD 관련 필드들
+            "client_ip": pick("x-ms-forwarded-client-ip", "X-MS-Forwarded-Client-IP", "ClientIP"),
+            "forwarded_client_ip": pick("x-ms-forwarded-client-ip", "X-MS-Forwarded-Client-IP"),
         }
         meta = {k: v for k, v in meta_candidates.items() if v}
     except Exception:
@@ -571,14 +576,15 @@ async def saml_dev_login(request: Request):
     department = request.query_params.get("department") or request.query_params.get("dept") or request.query_params.get("DeptName")
     team = request.query_params.get("team")
     title = request.query_params.get("title")
-    # 사내 속성들
-    login_id = request.query_params.get("LoginId")
+    # 사내 속성들 (정확한 claim명)
+    login_id = request.query_params.get("LoginId") or request.query_params.get("LginId")  # 계정
     dept_id = request.query_params.get("DeptId")
-    sabun = request.query_params.get("Sabun")
-    dept_name = request.query_params.get("DeptName")
-    grd_name = request.query_params.get("GrdName")
-    grd_name_en = request.query_params.get("GrdName_EN")
-    username = request.query_params.get("Username")
+    sabun = request.query_params.get("Sabun")  # 사번
+    dept_name = request.query_params.get("DeptName")  # 부서명
+    grd_name = request.query_params.get("GrdName")  # 담당업무
+    grd_name_en = request.query_params.get("GrdName_EN")  # 직급
+    username = request.query_params.get("Username")  # 이름 (필수)
+    client_ip = request.query_params.get("x-ms-forwarded-client-ip") or request.query_params.get("ClientIP")
 
     if not user:
         if account:
@@ -588,21 +594,24 @@ async def saml_dev_login(request: Request):
     # 메타데이터를 별도 쿠키에 JSON으로 저장
     meta = {
         "company": company,
-        "department": department or dept_name,
+        "department": department or dept_name,  # DeptName 우선 사용
         "team": team,
         "title": title or grd_name or grd_name_en,
         "account": account,
         "pc": pc,
-        "name": username,  # name 필드 추가
-        "email": user if "@" in user else None,  # user가 이메일 형식이면 email로 설정
-        # 사내 보존 필드들
-        "login_id": login_id or account,
+        "name": username,  # Username = 이름 (필수)
+        "email": user if "@" in user else None,
+        # 사내 보존 필드들 (정확한 claim명 매핑)
+        "login_id": login_id or account,  # LoginId/LginId = 계정
         "department_id": dept_id,
-        "employee_id": sabun,
-        "department_name": dept_name,
-        "grade": grd_name,
-        "grade_en": grd_name_en,
-        "username": username,
+        "employee_id": sabun,  # Sabun = 사번
+        "department_name": dept_name,  # DeptName = 부서명
+        "grade": grd_name,  # GrdName = 담당업무
+        "grade_en": grd_name_en,  # GrdName_EN = 직급
+        "username": username,  # Username = 이름
+        "display_name": username,  # Username을 display_name으로도 사용
+        "client_ip": client_ip,  # x-ms-forwarded-client-ip
+        "forwarded_client_ip": client_ip,
     }
     # None 제거
     meta = {k: v for k, v in meta.items() if v}
@@ -713,13 +722,23 @@ class AccessTrackingMiddleware(BaseHTTPMiddleware):
                 meta_dict = json.loads(meta_cookie)
             except Exception:
                 meta_dict = None
-        # 표시: 계정 이름 부서 IP
+        # 표시: 계정 이름 부서 IP (사내 claim 우선)
         display_user = user_cookie or client_ip
         if meta_dict:
-            name = meta_dict.get('Username') or meta_dict.get('username')
-            dept = meta_dict.get('DeptName') or meta_dict.get('department')
+            # 사내 claim 매핑
+            name = (meta_dict.get('username') or meta_dict.get('Username') or 
+                   meta_dict.get('display_name') or meta_dict.get('name'))
+            dept = (meta_dict.get('department_name') or meta_dict.get('DeptName') or 
+                   meta_dict.get('department'))
+            login_id = meta_dict.get('login_id') or meta_dict.get('LoginId')
+            
             parts = []
-            if user_cookie: parts.append(user_cookie)
+            # 계정 표시 (LoginId가 있으면 우선, 없으면 user_cookie)
+            if login_id and login_id != user_cookie:
+                parts.append(login_id)
+            elif user_cookie:
+                parts.append(user_cookie)
+            
             if name: parts.append(name)
             if dept: parts.append(dept)
             parts.append(client_ip)

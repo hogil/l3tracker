@@ -744,13 +744,15 @@ class AccessLogger:
             
             # 사용자 프로필 정보 추출 (사내 claim 우선)
             profile = data.get("profile", {})
-            # 계정: LoginId > employee_id > login_id > account > user_id
+            # 계정: LoginId > employee_id > login_id > account > user_id에서 IP 추출
             account = (profile.get("login_id") or profile.get("employee_id") or 
-                      profile.get("account") or profile.get("name") or user_id)
+                      profile.get("account") or profile.get("LoginId") or 
+                      profile.get("name") or user_id)
             # 이름: Username > username > name
-            name = profile.get("username") or profile.get("name", "")
+            name = (profile.get("Username") or profile.get("username") or 
+                   profile.get("name") or profile.get("display_name") or "")
             # 부서: DeptName > department_name > department
-            department = (profile.get("department_name") or 
+            department = (profile.get("DeptName") or profile.get("department_name") or 
                          profile.get("department", ""))
             
             # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
@@ -832,11 +834,13 @@ class AccessLogger:
                 profile = data.get("profile", {})
                 # 계정: LoginId > employee_id > login_id > account > user_id
                 account = (profile.get("login_id") or profile.get("employee_id") or 
-                          profile.get("account") or profile.get("name") or user_id)
+                          profile.get("account") or profile.get("LoginId") or 
+                          profile.get("name") or user_id)
                 # 이름: Username > username > name
-                name = profile.get("username") or profile.get("name", "")
+                name = (profile.get("Username") or profile.get("username") or 
+                       profile.get("name") or profile.get("display_name") or "")
                 # 부서: DeptName > department_name > department
-                department = (profile.get("department_name") or 
+                department = (profile.get("DeptName") or profile.get("department_name") or 
                              profile.get("department", ""))
                 
                 # 디스플레이명 구성: "계정 | 이름 | 부서 | IP"
