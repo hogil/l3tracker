@@ -1,0 +1,26 @@
+{
+  "sp": {
+    "entityId": "l3tracker-sp",
+    "assertionConsumerService": {
+      "url": "https://your-production-domain.com:8443/saml/acs",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    },
+    "singleLogoutService": {
+      "url": "https://your-production-domain.com:8443/saml/sls",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+  },
+  "idp": {
+    "entityId": "https://stsds.secsso.net/adfs/services/trust",
+    "singleSignOnService": {
+      "url": "https://stsds.secsso.net/adfs/ls",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "singleLogoutService": {
+      "url": "https://stsds.secsso.net/adfs/ls/?wa=wsignoutcleanup1.0",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "x509cert": "-----BEGIN CERTIFICATE-----\n[사내 운영 ADFS 인증서 내용을 여기에 입력]\n-----END CERTIFICATE-----"
+  }
+}
