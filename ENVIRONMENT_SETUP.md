@@ -77,7 +77,8 @@ source ~/.bashrc
 ```bash
 # 시스템 전체 환경변수 (관리자 권한 필요)
 sudo tee -a /etc/environment << 'EOF'
-UVICORN_WORKERS=16
+UVICORN_WORKERS=24
+UVICORN_WORKERS=24
 PROJECT_ROOT=/appdata/appuser/images
 HOST=0.0.0.0
 PORT=8080
@@ -104,7 +105,7 @@ EOF
 ```powershell
 # 관리자 권한으로 PowerShell 실행 후
 $envVars = @{
-    "UVICORN_WORKERS" = "16"
+    "UVICORN_WORKERS" = "24"
     "PROJECT_ROOT" = "D:\project\data\wm-811k"
     "HOST" = "0.0.0.0"
     "PORT" = "8080"
@@ -356,7 +357,7 @@ Get-ChildItem Env: | Where-Object {$_.Name -match "(UVICORN|PROJECT|SSL|HOST|POR
 - `DEV_SAML=1`
 
 #### 프로덕션 환경
-- `UVICORN_WORKERS=16` (CPU 코어 수의 50-75%)
+- `UVICORN_WORKERS=24` (CPU 코어 수의 50-75%)
 - `RELOAD=0`
 - `SSL_ENABLED=1`
 - `DEV_SAML=0`

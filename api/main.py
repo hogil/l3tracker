@@ -2209,7 +2209,7 @@ if __name__ == "__main__":
 
     # 워커 수 결정 로직
     # - 환경변수 UVICORN_WORKERS가 있으면 그대로 사용
-    # - 없으면 CPU 논리 코어의 50%를 기본값으로 사용 (최소 2, 최대 32)
+    # - 없으면 CPU 논리 코어의 75%를 기본값으로 사용 (최소 2, 최대 64)
     env_val = os.getenv("UVICORN_WORKERS")
     if env_val is not None and env_val.strip() != "":
         try:
@@ -2219,7 +2219,7 @@ if __name__ == "__main__":
     else:
         try:
             cpu_cnt = max(1, multiprocessing.cpu_count())
-            workers_env = max(2, min(32, int(cpu_cnt * 0.5)))
+            workers_env = max(2, min(64, int(cpu_cnt * 0.75)))
         except Exception:
             workers_env = 2
     # reload 사용 시 workers=1 고정. reload 비사용 시 환경변수로 워커 수 제어
