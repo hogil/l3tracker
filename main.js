@@ -1052,7 +1052,7 @@ class WaferMapViewer {
             const foldersData = await foldersResponse.json();
             const allFolders = foldersData.folders || [];
             
-            // 시스템 폴더 제외
+            // 시스템 폴더 제외 (labels는 Explorer에 노출하지 않음)
             const productFolders = allFolders.filter(folder => 
                 folder.name !== 'classification' && 
                 folder.name !== 'thumbnails' &&
