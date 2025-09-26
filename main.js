@@ -751,6 +751,98 @@ class WaferMapViewer {
         return fullPath;
     }
 
+    // 캔버스 즉시 클리어 (이전 이미지 제거)
+    clearCanvas() {
+        if (this.dom.imageCanvas && this.dom.overlayCanvas && this.dom.minimapCanvas) {
+            const imageCtx = this.dom.imageCanvas.getContext('2d');
+            const overlayCtx = this.dom.overlayCanvas.getContext('2d');
+            const minimapCtx = this.dom.minimapCanvas.getContext('2d');
+            
+            imageCtx.clearRect(0, 0, this.dom.imageCanvas.width, this.dom.imageCanvas.height);
+            overlayCtx.clearRect(0, 0, this.dom.overlayCanvas.width, this.dom.overlayCanvas.height);
+            minimapCtx.clearRect(0, 0, this.dom.minimapCanvas.width, this.dom.minimapCanvas.height);
+        }
+    }
+
+    // 로딩 인디케이터 표시/숨김
+    showLoadingIndicator(show) {
+        const loadingDiv = document.getElementById('loading-indicator') || this.createLoadingIndicator();
+        if (show) {
+            loadingDiv.style.display = 'flex';
+        } else {
+            loadingDiv.style.display = 'none';
+            // 숨길 때 텍스트 초기화
+            const loadingText = loadingDiv.querySelector('.loading-text');
+            if (loadingText) {
+                loadingText.textContent = '이미지를 로드하는 중...';
+            }
+        }
+    }
+
+    // 로딩 텍스트 업데이트
+    updateLoadingText(text) {
+        const loadingDiv = document.getElementById('loading-indicator');
+        if (loadingDiv) {
+            const loadingText = loadingDiv.querySelector('.loading-text');
+            if (loadingText) {
+                loadingText.textContent = text;
+            }
+        }
+    }
+
+    // 로딩 인디케이터 생성
+    createLoadingIndicator() {
+        let loadingDiv = document.getElementById('loading-indicator');
+        if (!loadingDiv) {
+            loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading-indicator';
+            loadingDiv.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div class="loading-text">이미지를 로드하는 중...</div>
+            `;
+            loadingDiv.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                z-index: 1000;
+            `;
+            
+            const style = document.createElement('style');
+            style.textContent = `
+                .loading-spinner {
+                    width: 40px;
+                    height: 40px;
+                    border: 4px solid #f3f3f3;
+                    border-top: 4px solid #3498db;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin-bottom: 10px;
+                }
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .loading-text {
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+            `;
+            document.head.appendChild(style);
+            
+            const mainContainer = document.getElementById('main-container') || document.body;
+            mainContainer.appendChild(loadingDiv);
+        }
+        return loadingDiv;
+    }
+
     // 현재 경로 업데이트
     async updateCurrentPath() {
         try {
@@ -3168,6 +3260,9 @@ class WaferMapViewer {
     }
 
     async handleFileClick(e) {
+        // 모든 폴더/파일 클릭 시 이전 썸네일 요청들 취소
+        this.thumbnailManager.cancelPendingRequests();
+        
         const target = e.target;
         // Handle folder expansion
         if (target.tagName === 'SUMMARY' && target.classList.contains('folder')) {
@@ -3406,10 +3501,42 @@ class WaferMapViewer {
     // --- IMAGE LOADING ---
     async loadImage(path) {
         try {
+            // 즉시 캔버스 클리어하여 이전 이미지 제거
+            this.clearCanvas();
+            
+            // 로딩 인디케이터 표시
+            this.showLoadingIndicator(true);
+            
+            // 현재 로딩 요청 추적
+            this.currentLoadingPath = path;
+            
+            // 이미지 크기 확인을 위한 HEAD 요청
+            let isLargeImage = false;
+            try {
+                const headResponse = await fetch(`/api/image?path=${encodeURIComponent(path)}`, { method: 'HEAD' });
+                const contentLength = headResponse.headers.get('content-length');
+                if (contentLength && parseInt(contentLength) > 10 * 1024 * 1024) {
+                    isLargeImage = true;
+                    this.updateLoadingText('대용량 이미지 로딩 중... (10MB+ 파일)');
+                }
+            } catch (e) {
+                // HEAD 요청 실패 시 무시하고 계속 진행
+            }
+            
             const blob = await fetch(`/api/image?path=${encodeURIComponent(path)}`).then(r => r.blob());
+            
+            // 로딩 중에 다른 이미지가 선택되었다면 중단
+            if (this.currentLoadingPath !== path) {
+                console.log(`🔄 [CANCELLED] 로딩 중단: ${path} (새로운 요청으로 인해)`);
+                return;
+            }
+            
             this.currentImageBitmap = await createImageBitmap(blob);
             this.currentImage = this.currentImageBitmap;
             this.selectedImagePath = path; // 단일 이미지 모드를 위한 경로 설정
+            
+            // 로딩 인디케이터 숨기기
+            this.showLoadingIndicator(false);
             
             // SemiconductorRenderer가 있으면 현재 비트맵으로 직접 로드 (동일 소스 보장)
             if (this.semiconductorRenderer) {
@@ -3437,6 +3564,9 @@ class WaferMapViewer {
             // 파일명 표시
             this.showFileName(path);
             
+            // 현재 로딩 추적 리셋
+            this.currentLoadingPath = null;
+            
             // 줌 바 표시 (이미지가 로드되었을 때만)
             const viewControls = document.querySelector('.view-controls');
             if (viewControls) {
@@ -3461,6 +3591,8 @@ class WaferMapViewer {
         } catch (err) {
             console.error(`Failed to load image: ${path}`, err);
             this.dom.minimapContainer.style.display = 'none';
+            this.showLoadingIndicator(false);
+            this.currentLoadingPath = null;
         }
     }
 
@@ -5596,6 +5728,9 @@ class WaferMapViewer {
 
     // 2. Grid rendering
     showGrid(images) {
+        // 이전 폴더/이미지 요청들 즉시 취소
+        this.thumbnailManager.cancelPendingRequests();
+        
         this.gridMode = true;
         this.selectedImages = images;
         // 현재 스크롤 위치 저장 (그리드 복귀 시 사용)

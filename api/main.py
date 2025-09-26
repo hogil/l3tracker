@@ -291,6 +291,10 @@ INDEX_READY = False
 FILE_INDEX: Dict[str, Dict[str, Any]] = {}
 FILE_INDEX_LOCK = RLock()
 
+# 빠른 제품 폴더 접근을 위한 캐시
+ROOT_FOLDERS: List[Dict[str, str]] = []  # [{"name": "folder_name", "path": "full_path"}]
+ROOT_FOLDERS_READY = False
+
 LABELS: Dict[str, List[str]] = {}
 LABELS_LOCK = RLock()
 LABELS_MTIME: float = 0.0
@@ -994,14 +998,32 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     return items
 
 async def build_file_index_background():
-    global INDEX_BUILDING, INDEX_READY
+    global INDEX_BUILDING, INDEX_READY, ROOT_FOLDERS_READY
     if INDEX_BUILDING: return
     INDEX_BUILDING, INDEX_READY = True, False
     log_access_row(tag="INFO", note="백그라운드 인덱스 구축 시작")
 
     def _walk_and_index():
-        global INDEX_READY
+        global INDEX_READY, ROOT_FOLDERS, ROOT_FOLDERS_READY
         start = time.time()
+        
+        # 1단계: 루트 폴더들 먼저 스캔 (즉시 UI에서 사용 가능)
+        try:
+            root_folders = []
+            for item in os.listdir(ROOT_DIR):
+                item_path = ROOT_DIR / item
+                if item_path.is_dir() and item not in SKIP_DIRS:
+                    root_folders.append({
+                        "name": item,
+                        "path": str(item_path)
+                    })
+            ROOT_FOLDERS = root_folders
+            ROOT_FOLDERS_READY = True
+            log_access_row(tag="INFO", note=f"제품 폴더 스캔 완료: {len(ROOT_FOLDERS)}개")
+        except Exception as e:
+            log_access_row(tag="ERROR", note=f"루트 폴더 스캔 실패: {str(e)}")
+        
+        # 2단계: 전체 파일 인덱싱 (기존 로직)
         for root, dirs, files in os.walk(ROOT_DIR):
             if BACKGROUND_TASKS_PAUSED or USER_ACTIVITY_FLAG: time.sleep(0.1)
             for skip in list(SKIP_DIRS):
@@ -1020,7 +1042,7 @@ async def build_file_index_background():
             time.sleep(0.001)
         INDEX_READY = True
         elapsed = time.time() - start
-        log_access_row(tag="INFO", note=f"인덱스 구축 완료: {len(FILE_INDEX)}개, {elapsed:.1f}s")
+        log_access_row(tag="INFO", note=f"전체 인덱스 구축 완료: {len(FILE_INDEX)}개, {elapsed:.1f}s")
 
     try:
         await asyncio.get_running_loop().run_in_executor(ThreadPoolExecutor(max_workers=1), _walk_and_index)
@@ -1184,6 +1206,43 @@ class ClassifyDeleteBatchReq(BaseModel):
     class_: str = Field(alias="class")
 
 # ======================== Endpoints ========================
+@app.get("/api/root-folders")
+async def get_root_folders():
+    """
+    루트 폴더들을 즉시 반환 (파일 인덱싱 중에도 사용 가능)
+    제품 폴더 선택을 위한 빠른 API
+    """
+    global ROOT_FOLDERS_READY, ROOT_FOLDERS
+    try:
+        if ROOT_FOLDERS_READY:
+            # 이미 스캔 완료된 경우
+            folders = [{"name": f["name"], "type": "directory", "path": f["path"]} for f in ROOT_FOLDERS]
+        else:
+            # 실시간 스캔 (폴백)
+            folders = []
+            try:
+                for item in os.listdir(ROOT_DIR):
+                    item_path = ROOT_DIR / item
+                    if item_path.is_dir() and item not in SKIP_DIRS:
+                        folders.append({
+                            "name": item,
+                            "type": "directory", 
+                            "path": str(item_path)
+                        })
+            except Exception:
+                pass
+        
+        folders.sort(key=lambda x: x['name'].lower())
+        return {
+            "success": True, 
+            "items": folders,
+            "scanning": INDEX_BUILDING and not INDEX_READY,
+            "folders_ready": ROOT_FOLDERS_READY
+        }
+    except Exception as e:
+        logger.exception(f"루트 폴더 조회 실패: {e}")
+        return {"success": False, "error": str(e), "items": []}
+
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None, prefer: Optional[str] = None):
     try:
@@ -1274,7 +1333,7 @@ def _lookup_original_relpath_from_classification_path(path_str: str) -> Optional
     except Exception:
         return None
 
-@app.get("/api/image")
+@app.api_route("/api/image", methods=["GET", "HEAD"])
 async def get_image(request: Request, path: str):
     try:
         image_path = safe_resolve_path(path)
@@ -1283,7 +1342,11 @@ async def get_image(request: Request, path: str):
         st = image_path.stat()
         resp_304 = maybe_304(request, st)
         if resp_304: return resp_304
-        headers = {"Cache-Control": "public, max-age=86400, immutable", "ETag": compute_etag(st)}
+        headers = {
+            "Cache-Control": "public, max-age=86400, immutable", 
+            "ETag": compute_etag(st),
+            "Content-Length": str(st.st_size)
+        }
         return FileResponse(image_path, headers=headers)
     except Exception as e:
         logger.exception(f"이미지 제공 실패: {e}")
