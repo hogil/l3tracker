@@ -66,7 +66,7 @@ export THUMBNAIL_SEM="32"
 export DIRLIST_CACHE_SIZE="1024"
 
 # 디버그/개발 설정
-export RELOAD="0"
+export RELOAD="1"
 EOF
 
 # 환경변수 적용
@@ -94,7 +94,7 @@ THUMBNAIL_QUALITY=100
 IO_THREADS=16
 THUMBNAIL_SEM=32
 DIRLIST_CACHE_SIZE=1024
-RELOAD=0
+RELOAD=1
 EOF
 ```
 
@@ -121,7 +121,7 @@ $envVars = @{
     "IO_THREADS" = "16"
     "THUMBNAIL_SEM" = "32"
     "DIRLIST_CACHE_SIZE" = "1024"
-    "RELOAD" = "0"
+    "RELOAD" = "1"
 }
 
 # 사용자 환경변수로 설정
