@@ -48,7 +48,24 @@ class ThumbnailManager {
     cancelPendingRequests() {
         try { this.backgroundRunning = false; } catch (_) {}
         try { this.loadQueue.length = 0; } catch (_) {}
-        try { if (this.observer) { this.observer.disconnect(); this.observer = null; } } catch (_) {}
+        try {
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+            }
+        } catch (_) {}
+        try {
+            // 아직 로드되지 않은 placeholder 이미지들의 src를 비워 브라우저 요청 중단 유도
+            const grid = document.getElementById('image-grid');
+            if (grid) {
+                const imgs = grid.querySelectorAll('.grid-thumb-wrap img.grid-thumb-img');
+                imgs.forEach(img => {
+                    if (img.src && (img.src.startsWith('data:') || img.dataset.thumbnailLoading === 'true')) {
+                        img.removeAttribute('src');
+                    }
+                });
+            }
+        } catch (_) {}
     }
 
     async loadThumbnail(imgPath) {
@@ -443,7 +460,6 @@ function setPixelPerfectRendering(ctx) {
         ctx.imageSmoothingQuality = 'low';
     }
 }
-
 class WaferMapViewer {
     constructor() {
         this.cacheDom();
@@ -1182,7 +1198,6 @@ class WaferMapViewer {
             this.loadFolderBrowser(this.currentFolderPath);
         }
     }
-
     // 폴더 브라우저 이벤트 설정
     setupFolderBrowserEvents() {
         const modal = document.getElementById('folder-browser-modal');
@@ -1963,7 +1978,6 @@ class WaferMapViewer {
         
 
     }
-
     /**
      * Initial application entry point.
      */
@@ -2764,7 +2778,6 @@ class WaferMapViewer {
             this._singleMenuOutsideHandler = null;
         }
     }
-
     async copyCurrentImageToClipboard() {
         try {
             if (!this.selectedImagePath) return;
@@ -3559,7 +3572,6 @@ class WaferMapViewer {
     handleResize() {
         this.scheduleDraw();
     }
-    
     // --- PAN & ZOOM HANDLERS ---
     handleMouseDown(e) {
         if (this.gridMode) return; // grid 모드에서는 팬(이동) 비활성화
@@ -4328,7 +4340,6 @@ class WaferMapViewer {
             removeBtn.disabled = count === 0;
         }
     }
-
     async removeSelectedLabels() {
         if (!this.selectedLabelsForRemoval || this.selectedLabelsForRemoval.length === 0) {
             alert('Please select labels to remove');
@@ -4899,7 +4910,6 @@ class WaferMapViewer {
             }
         }
     }
-
     renderLabelExplorerContent(container, classes, classToImgList, labelSelection) {
         container.innerHTML = '';
         
@@ -5636,13 +5646,12 @@ class WaferMapViewer {
             this.loadCurrentFolderThumbnails(images);
         }, 100);
     }
-
     // 즉시 DOM 구성 + 썸네일 직접 로드로 최초 표시 시간을 단축
     showGridImmediately(images) {
         const grid = document.getElementById('image-grid');
         if (!grid) return;
         grid.innerHTML = '';
-
+        const initialChunk = Math.min(images.length, 60); // 최초 가시 영역 우선
         images.forEach((imgPath, idx) => {
             const wrap = document.createElement('div');
             wrap.className = 'grid-thumb-wrap' + (this.gridSelectedIdxs.includes(idx) ? ' selected' : '');
@@ -5678,10 +5687,16 @@ class WaferMapViewer {
             img.style.imageRendering = '-webkit-optimize-contrast';
             img.ondragstart = e => e.preventDefault();
 
-            // 직접 썸네일 로드(캐시 활용). 필요 시 캐시 무효화를 위해 t 파라미터 사용 가능
-            img.onload = () => { img.style.opacity = '1'; };
-            img.onerror = () => { img.style.backgroundColor = '#333'; img.style.opacity = '0.5'; };
-            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`;
+            // 기본은 placeholder로 두고 관찰 → 뷰포트 진입 시 로드
+            img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiMyMzIzMjMiLz48L3N2Zz4=';
+            this.thumbnailManager && this.thumbnailManager.observeElement && this.thumbnailManager.observeElement(wrap);
+
+            // 초기 청크만 즉시 로드해 첫 페인트 가속
+            if (idx < initialChunk) {
+                this.thumbnailManager && this.thumbnailManager.loadThumbnailAndDisplay && this.thumbnailManager.loadThumbnailAndDisplay(imgPath, wrap, 'urgent');
+                img.onload = () => { img.style.opacity = '1'; };
+                img.onerror = () => { img.style.backgroundColor = '#333'; img.style.opacity = '0.5'; };
+            }
 
             thumbBox.appendChild(img);
             wrap.appendChild(thumbBox);
