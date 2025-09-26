@@ -5604,17 +5604,76 @@ class WaferMapViewer {
         grid.innerHTML = '';
         // grid 모드에서는 cursor를 default로
         this.dom.viewerContainer.style.cursor = 'default';
-        // 점진 렌더링으로 UI 멈춤 방지 (가시영역 우선, 백그라운드 순차 로드)
-        this.showGridStream(images);
+        // 즉시 렌더링으로 최초 체감 로딩 지연 감소
+        this.showGridImmediately(images);
         grid.classList.add('active');
         setTimeout(() => this.updateGridSquaresPixel(), 0);
         if (!this.gridResizeObserver) {
             this.gridResizeObserver = new ResizeObserver(() => this.updateGridSquaresPixel());
             this.gridResizeObserver.observe(grid);
         }
-        
-        // 스크롤 시 보이는 썸네일 우선 로드를 위한 이벤트 리스너
-        this.setupGridScrollOptimization();
+        // 초기 배치만 가볍게 프리로드 (서버/클라이언트 부하 방지)
+        setTimeout(() => {
+            this.loadCurrentFolderThumbnails(images);
+        }, 100);
+    }
+
+    // 즉시 DOM 구성 + 썸네일 직접 로드로 최초 표시 시간을 단축
+    showGridImmediately(images) {
+        const grid = document.getElementById('image-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        images.forEach((imgPath, idx) => {
+            const wrap = document.createElement('div');
+            wrap.className = 'grid-thumb-wrap' + (this.gridSelectedIdxs.includes(idx) ? ' selected' : '');
+            wrap.setAttribute('data-img-path', imgPath);
+            wrap.setAttribute('data-img-idx', idx);
+            
+            // 선택/열기/컨텍스트 메뉴
+            wrap.onclick = e => { e.stopPropagation(); this.toggleGridImageSelect(idx, e); };
+            wrap.ondblclick = e => { e.stopPropagation(); this.enterSingleImageMode(idx); };
+            wrap.oncontextmenu = e => { e.preventDefault(); e.stopPropagation(); this.showContextMenu(e, idx); };
+            
+            // 썸네일 컨테이너 + 이미지
+            const thumbBox = document.createElement('div');
+            thumbBox.className = 'grid-thumb-imgbox';
+            const img = document.createElement('img');
+            img.className = 'grid-thumb-img';
+            img.alt = imgPath.split('/').pop();
+            img.setAttribute('data-img-path', imgPath);
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            img.style.opacity = '0';
+            img.style.imageRendering = 'high-quality';
+            img.style.imageRendering = 'crisp-edges';
+            img.style.imageRendering = '-webkit-optimize-contrast';
+            img.ondragstart = e => e.preventDefault();
+
+            // 직접 썸네일 로드(캐시 활용). 필요 시 캐시 무효화를 위해 t 파라미터 사용 가능
+            img.onload = () => { img.style.opacity = '1'; };
+            img.onerror = () => { img.style.backgroundColor = '#333'; img.style.opacity = '0.5'; };
+            img.src = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}`;
+
+            thumbBox.appendChild(img);
+            wrap.appendChild(thumbBox);
+
+            // 선택 표시
+            if (this.gridSelectedIdxs.includes(idx)) {
+                const check = document.createElement('div');
+                check.className = 'grid-thumb-check';
+                check.textContent = '✓';
+                thumbBox.appendChild(check);
+            }
+
+            // 파일명 라벨
+            const label = document.createElement('div');
+            label.className = 'grid-thumb-label';
+            label.textContent = imgPath.split('/').pop();
+            wrap.appendChild(label);
+
+            grid.appendChild(wrap);
+        });
     }
 
     // 그리드 스크롤 최적화 설정
