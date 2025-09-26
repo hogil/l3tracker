@@ -37,7 +37,7 @@ cat >> ~/.bashrc << 'EOF'
 
 # L3Tracker 환경변수
 export UVICORN_WORKERS=16
-export PROJECT_ROOT="/home/user/wafer_images"
+export PROJECT_ROOT="/appdata/appuser/images"
 export HOST="0.0.0.0"
 export PORT="8080"
 export SSL_ENABLED="1"
@@ -78,7 +78,7 @@ source ~/.bashrc
 # 시스템 전체 환경변수 (관리자 권한 필요)
 sudo tee -a /etc/environment << 'EOF'
 UVICORN_WORKERS=16
-PROJECT_ROOT=/home/user/wafer_images
+PROJECT_ROOT=/appdata/appuser/images
 HOST=0.0.0.0
 PORT=8080
 SSL_ENABLED=1
@@ -105,7 +105,7 @@ EOF
 # 관리자 권한으로 PowerShell 실행 후
 $envVars = @{
     "UVICORN_WORKERS" = "16"
-    "PROJECT_ROOT" = "D:\wafer_images"
+    "PROJECT_ROOT" = "D:\project\data\wm-811k"
     "HOST" = "0.0.0.0"
     "PORT" = "8080"
     "SSL_ENABLED" = "1"

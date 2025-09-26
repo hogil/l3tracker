@@ -39,6 +39,7 @@ class ThumbnailManager {
         this.backgroundQueue = []; // 백그라운드 큐
         this.isProcessingQueue = false;
         this.backgroundRunning = false; // 백그라운드 스트리밍 상태
+        this.controllers = new Map(); // path -> AbortController
         
         // Intersection Observer 설정 (뷰포트 감지)
         this.setupIntersectionObserver();
@@ -55,12 +56,17 @@ class ThumbnailManager {
             }
         } catch (_) {}
         try {
+            // 진행 중 fetch 강제 중단
+            this.controllers.forEach(ctrl => { try { ctrl.abort(); } catch(_) {} });
+            this.controllers.clear();
+        } catch(_) {}
+        try {
             // 아직 로드되지 않은 placeholder 이미지들의 src를 비워 브라우저 요청 중단 유도
             const grid = document.getElementById('image-grid');
             if (grid) {
                 const imgs = grid.querySelectorAll('.grid-thumb-wrap img.grid-thumb-img');
                 imgs.forEach(img => {
-                    if (img.src && (img.src.startsWith('data:') || img.dataset.thumbnailLoading === 'true')) {
+                    if (img.src && (!img.complete || img.src.startsWith('data:') || img.dataset.thumbnailLoading === 'true')) {
                         img.removeAttribute('src');
                     }
                 });
@@ -104,25 +110,24 @@ class ThumbnailManager {
     }
 
     async fetchThumbnail(imgPath) {
-        // 동시 로딩 수 제한
-        // 우선순위에 따라 동시 로딩 상한을 가변 적용 (urgent일수록 상향)
+        // 동시 로딩 수 제한 (urgent 가중치)
         const isUrgent = (typeof imgPath === 'string' && imgPath.includes('__urgent__'));
         const dynamicCap = isUrgent ? Math.max(this.maxConcurrentLoads, 16) : this.maxConcurrentLoads;
         if (this.concurrentLoads >= dynamicCap) {
             await new Promise(resolve => this.loadQueue.push(resolve));
         }
-        
         this.concurrentLoads++;
-        
+        const controller = new AbortController();
+        this.controllers.set(imgPath, controller);
         try {
-            // blob URL 대신 서버 캐시 가능한 정적 썸네일 URL을 직접 사용하여
-            // blob revoke로 인한 net::ERR_FILE_NOT_FOUND 문제를 원천 차단
-            const url = `/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=${DEFAULT_THUMB_SIZE}`;
-            // 사전 핑 제거: 서버가 HEAD를 허용하지 않아 405가 발생하므로 생략
+            const resp = await fetch(`/api/thumbnail?path=${encodeURIComponent(imgPath)}&size=512&t=${Date.now()}` , { signal: controller.signal });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
             return url;
         } finally {
+            try { this.controllers.delete(imgPath); } catch(_) {}
             this.concurrentLoads--;
-            // 대기 중인 요청 처리
             if (this.loadQueue.length > 0) {
                 const resolve = this.loadQueue.shift();
                 resolve();
