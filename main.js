@@ -44,6 +44,13 @@ class ThumbnailManager {
         this.setupIntersectionObserver();
     }
 
+    // 진행 중/예약된 썸네일 작업 즉시 취소(백그라운드 스트림/큐/옵저버)
+    cancelPendingRequests() {
+        try { this.backgroundRunning = false; } catch (_) {}
+        try { this.loadQueue.length = 0; } catch (_) {}
+        try { if (this.observer) { this.observer.disconnect(); this.observer = null; } } catch (_) {}
+    }
+
     async loadThumbnail(imgPath) {
         const cached = this.cache.get(imgPath);
         
@@ -5576,6 +5583,11 @@ class WaferMapViewer {
     showGrid(images) {
         this.gridMode = true;
         this.selectedImages = images;
+        // 현재 스크롤 위치 저장 (그리드 복귀 시 사용)
+        try {
+            const scroller = document.querySelector('.grid-scroll-wrapper');
+            this._gridScrollTop = scroller ? scroller.scrollTop : 0;
+        } catch (_) { this._gridScrollTop = 0; }
         if (!this.gridSelectedIdxs) this.gridSelectedIdxs = [];
         const grid = document.getElementById('image-grid');
         const gridControls = document.getElementById('grid-controls');
@@ -5612,6 +5624,13 @@ class WaferMapViewer {
             this.gridResizeObserver = new ResizeObserver(() => this.updateGridSquaresPixel());
             this.gridResizeObserver.observe(grid);
         }
+        // 이전 스크롤 위치 복원
+        try {
+            const scroller = document.querySelector('.grid-scroll-wrapper');
+            if (scroller && typeof this._lastGridScrollTop === 'number') {
+                scroller.scrollTop = this._lastGridScrollTop;
+            }
+        } catch (_) {}
         // 초기 배치만 가볍게 프리로드 (서버/클라이언트 부하 방지)
         setTimeout(() => {
             this.loadCurrentFolderThumbnails(images);
@@ -5630,8 +5649,17 @@ class WaferMapViewer {
             wrap.setAttribute('data-img-path', imgPath);
             wrap.setAttribute('data-img-idx', idx);
             
-            // 선택/열기/컨텍스트 메뉴
-            wrap.onclick = e => { e.stopPropagation(); this.toggleGridImageSelect(idx, e); };
+        // 선택/열기/컨텍스트 메뉴 (선택 즉시 취소 시 네트워크 작업 중단)
+        wrap.onclick = e => { 
+            e.stopPropagation(); 
+            if (e && (e.ctrlKey || e.shiftKey)) {
+                // 멀티/범위 선택 해제 시 백그라운드 작업도 함께 중단
+                if (this.thumbnailManager && this.gridSelectedIdxs && this.gridSelectedIdxs.length > 0) {
+                    try { this.thumbnailManager.cancelPendingRequests(); } catch(_) {}
+                }
+            }
+            this.toggleGridImageSelect(idx, e);
+        };
             wrap.ondblclick = e => { e.stopPropagation(); this.enterSingleImageMode(idx); };
             wrap.oncontextmenu = e => { e.preventDefault(); e.stopPropagation(); this.showContextMenu(e, idx); };
             
@@ -5942,6 +5970,11 @@ class WaferMapViewer {
         this.gridMode = false;
         const grid = document.getElementById('image-grid');
         
+        // 그리드 관련 네트워크/백그라운드 작업 즉시 중단
+        if (this.thumbnailManager && typeof this.thumbnailManager.cancelPendingRequests === 'function') {
+            this.thumbnailManager.cancelPendingRequests();
+        }
+
         // 그리드 상태 초기화
         if (this.gridSelectedIdxs) {
             this.gridSelectedIdxs = [];
@@ -5968,6 +6001,12 @@ class WaferMapViewer {
             grid.innerHTML = '';
         }
         
+        // 현재 스크롤 위치 저장
+        try {
+            const scroller = document.querySelector('.grid-scroll-wrapper');
+            this._lastGridScrollTop = scroller ? scroller.scrollTop : 0;
+        } catch (_) { this._lastGridScrollTop = 0; }
+
         // 화면 모드 전환
         this.dom.viewerContainer.classList.remove('grid-mode');
         this.dom.viewerContainer.classList.add('single-image-mode');
