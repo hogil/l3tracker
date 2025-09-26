@@ -150,4 +150,4 @@ Desktop.ini
 private/
 confidential/
 data/
-dataset/
+dataset/\n# Claude workspace\n.claude/
