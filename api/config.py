@@ -12,7 +12,9 @@ THUMBNAIL_QUALITY = int(os.getenv("THUMBNAIL_QUALITY", "100"))
 
 SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp', '.gif'}
 # 검색/인덱싱에서 건너뛸 폴더(쉼표로 구분)
-SKIP_DIRS = set(os.getenv("SKIP_DIRS", "classification,thumbnails").split(","))
+# 검색/인덱싱에서 건너뛸 폴더(쉼표로 구분)
+# 기본값에 labels/label/thumbnail 도 포함해 모든 동의어를 포괄
+SKIP_DIRS = set(os.getenv("SKIP_DIRS", "classification,thumbnails,thumbnail,labels,label").split(","))
 
 # ===== 동시성 / 성능 =====
 CPU_COUNT = os.cpu_count() or 8

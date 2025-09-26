@@ -1,3 +1,9 @@
+cert/
+logs/
+*.pem
+*.key
+*.crt
+.claude/
 # Python
 __pycache__/
 *.pyc

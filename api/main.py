@@ -283,6 +283,17 @@ THUMBNAIL_PERF = {
     "total_time": 0.0
 }
 
+# 폴더/이미지 로딩 성능 디버그 카운터
+LOADING_PERF = {
+    "folder_scans": 0,
+    "folder_scan_time": 0.0,
+    "image_loads": 0,
+    "image_load_time": 0.0,
+    "thumbnail_requests": 0,
+    "thumbnail_request_time": 0.0,
+    "last_operation": ""
+}
+
 USER_ACTIVITY_FLAG = False
 BACKGROUND_TASKS_PAUSED = False
 INDEX_BUILDING = False
@@ -949,6 +960,9 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
     directories = []
     files = []
     
+    # SKIP_DIRS는 모든 경로에서 적용 (루트만이 아니라 하위 폴더에서도 숨김)
+    skip_set = {s.strip().lower() for s in SKIP_DIRS}
+    
     try:
         # 최고속 스캔: 예외 처리 및 함수 호출 최소화
         with os.scandir(target) as entries:
@@ -956,7 +970,12 @@ def list_dir_fast(target: Path) -> List[Dict[str, str]]:
                 try:
                     name = entry.name
                     # 슠운 최속 검사: 문자열 첫 글자 확인
-                    if name[0] == '.' or name == '__pycache__' or name in SKIP_DIRS:
+                    if name[0] == '.' or name == '__pycache__':
+                        continue
+                    
+                    # 모든 경로에서 숨겨야 하는 폴더/파일명 건너뛰기
+                    # 비교는 대소문자 무시
+                    if name.lower() in skip_set:
                         continue
                     
                     # is_dir 호출 최소화: 에러 발생시 건너뛰기
@@ -1245,18 +1264,39 @@ async def get_root_folders():
 
 @app.get("/api/files")
 async def get_files(path: Optional[str] = None, prefer: Optional[str] = None):
+    scan_start = time.time()
     try:
+        global LOADING_PERF
         target = safe_resolve_path(path)
         if not target.exists() or not target.is_dir():
             return JSONResponse({"success": False, "error": "Not found"}, status_code=404)
         if any(x in str(target).replace('\\', '/') for x in ['classification', 'images', 'labels']):
             _dircache_invalidate(target)
+        
+        # 폴더 스캔 성능 측정 시작
+        scan_time = time.time()
         items = list_dir_fast(target)
+        scan_elapsed = time.time() - scan_time
+        
         # 단순 정렬: 폴더(내림차순) → 파일(내림차순)
         directories = [item for item in items if item['type'] == 'directory']
         files = [item for item in items if item['type'] == 'file']
         directories.sort(key=lambda x: x['name'].lower(), reverse=True)
         files.sort(key=lambda x: x['name'].lower(), reverse=True)
+        
+        total_elapsed = time.time() - scan_start
+        total_items = len(directories) + len(files)
+        
+        # 성능 카운터 업데이트
+        LOADING_PERF["folder_scans"] += 1
+        LOADING_PERF["folder_scan_time"] += total_elapsed
+        LOADING_PERF["last_operation"] = f"Folder scan: {target.name}"
+        
+        # 성능 디버그 로그 (항목이 많은 폴더만)
+        if total_items > 100 or total_elapsed > 0.5:
+            items_per_sec = total_items / max(0.001, total_elapsed)
+            logger.info(f"📁 [PERF] Scanned {total_items} items in {target.name} - {total_elapsed:.2f}s ({items_per_sec:.0f}/s)")
+        
         return {"success": True, "items": directories + files}
     except Exception as e:
         logger.exception(f"폴더 조회 실패: {e}")
@@ -1335,18 +1375,38 @@ def _lookup_original_relpath_from_classification_path(path_str: str) -> Optional
 
 @app.api_route("/api/image", methods=["GET", "HEAD"])
 async def get_image(request: Request, path: str):
+    load_start = time.time()
     try:
+        global LOADING_PERF
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
         st = image_path.stat()
         resp_304 = maybe_304(request, st)
-        if resp_304: return resp_304
+        if resp_304: 
+            # 304 캐시 히트도 카운트 (매우 빠른 응답)
+            load_elapsed = time.time() - load_start
+            LOADING_PERF["image_loads"] += 1
+            LOADING_PERF["image_load_time"] += load_elapsed
+            return resp_304
+        
+        file_size_mb = st.st_size / (1024 * 1024)
         headers = {
             "Cache-Control": "public, max-age=86400, immutable", 
             "ETag": compute_etag(st),
             "Content-Length": str(st.st_size)
         }
+        
+        load_elapsed = time.time() - load_start
+        LOADING_PERF["image_loads"] += 1
+        LOADING_PERF["image_load_time"] += load_elapsed
+        LOADING_PERF["last_operation"] = f"Image load: {image_path.name}"
+        
+        # 큰 파일(5MB+)이나 느린 로딩(200ms+) 디버그 로그
+        if file_size_mb > 5.0 or load_elapsed > 0.2:
+            method = "HEAD" if request.method == "HEAD" else "GET"
+            logger.info(f"🖼️ [PERF] {method} {image_path.name} ({file_size_mb:.1f}MB) - {load_elapsed:.2f}s")
+        
         return FileResponse(image_path, headers=headers)
     except Exception as e:
         logger.exception(f"이미지 제공 실패: {e}")
@@ -1354,7 +1414,9 @@ async def get_image(request: Request, path: str):
 
 @app.get("/api/thumbnail")
 async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_DEFAULT, refresh: int = 0):
+    thumb_start = time.time()
     try:
+        global LOADING_PERF
         image_path = safe_resolve_path(path)
         if not image_path.exists() or not image_path.is_file():
             raise HTTPException(status_code=404, detail="Image not found")
@@ -1391,6 +1453,17 @@ async def get_thumbnail(request: Request, path: str, size: int = THUMBNAIL_SIZE_
         key = f"{thumb}|{size}x{size}"
         backend = THUMB_BACKEND.get(key, "cache")
         resp.headers["X-Thumb-Backend"] = backend
+        
+        # 성능 카운터 업데이트
+        thumb_elapsed = time.time() - thumb_start
+        LOADING_PERF["thumbnail_requests"] += 1
+        LOADING_PERF["thumbnail_request_time"] += thumb_elapsed
+        LOADING_PERF["last_operation"] = f"Thumbnail: {image_path.name}"
+        
+        # 썸네일 생성이 느린 경우 디버그 로그 (300ms 이상)
+        if backend != "cache" and thumb_elapsed > 0.3:
+            backend_name = "PyVips" if "vips" in backend else "Pillow"
+            logger.info(f"🎨 [PERF] Thumbnail {size}px {image_path.name} via {backend_name} - {thumb_elapsed:.2f}s")
         # 디버그 로깅 축소: 배치 모드에서만 로그 출력
         if backend != "cache" and batch_mode:
             backend_name = "PyVips" if "vips" in backend else "Pillow"
@@ -1789,6 +1862,49 @@ async def reload_stats():
     except Exception as e:
         logger.error(f"통계 데이터 재로드 실패: {e}")
         return {"error": str(e)}
+
+@app.get("/api/performance/stats")
+async def get_performance_stats():
+    """실시간 성능 통계 조회 (디버그용)"""
+    try:
+        global LOADING_PERF, THUMBNAIL_PERF
+        
+        # 썸네일 성능 계산
+        thumb_total = THUMBNAIL_PERF["total_generated"]
+        thumb_total_time = THUMBNAIL_PERF["total_time"]
+        thumb_avg_ms = (thumb_total_time * 1000 / max(1, thumb_total))
+        thumb_speed = thumb_total / max(0.001, thumb_total_time)
+        pyvips_pct = (THUMBNAIL_PERF["pyvips_count"] / max(1, thumb_total)) * 100
+        
+        # 로딩 성능 계산
+        folder_avg_ms = (LOADING_PERF["folder_scan_time"] * 1000 / max(1, LOADING_PERF["folder_scans"]))
+        image_avg_ms = (LOADING_PERF["image_load_time"] * 1000 / max(1, LOADING_PERF["image_loads"]))
+        thumbnail_req_avg_ms = (LOADING_PERF["thumbnail_request_time"] * 1000 / max(1, LOADING_PERF["thumbnail_requests"]))
+        
+        return {
+            "success": True,
+            "thumbnail_generation": {
+                "total_generated": thumb_total,
+                "pyvips_count": THUMBNAIL_PERF["pyvips_count"],
+                "pillow_count": THUMBNAIL_PERF["pillow_count"],
+                "pyvips_percentage": f"{pyvips_pct:.1f}%",
+                "average_time_ms": f"{thumb_avg_ms:.1f}",
+                "throughput_per_sec": f"{thumb_speed:.0f}",
+                "total_time_sec": f"{thumb_total_time:.2f}"
+            },
+            "loading_performance": {
+                "folder_scans": LOADING_PERF["folder_scans"],
+                "folder_scan_avg_ms": f"{folder_avg_ms:.1f}",
+                "image_loads": LOADING_PERF["image_loads"],
+                "image_load_avg_ms": f"{image_avg_ms:.1f}",
+                "thumbnail_requests": LOADING_PERF["thumbnail_requests"],
+                "thumbnail_request_avg_ms": f"{thumbnail_req_avg_ms:.1f}",
+                "last_operation": LOADING_PERF["last_operation"]
+            }
+        }
+    except Exception as e:
+        logger.exception(f"성능 통계 조회 실패: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/export/detailed-access")
 async def export_detailed_access():
@@ -2195,11 +2311,18 @@ async def browse_folders(path: Optional[str] = None):
             raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다")
 
         folders = []
+        skip_set = {s.strip().lower() for s in SKIP_DIRS}
         try:
             with os.scandir(target_path) as it:
                 for entry in it:
-                    if entry.is_dir(follow_symlinks=False) and not entry.name.startswith('.'):
-                        folders.append({"name": entry.name, "path": str(entry.path), "type": "folder"})
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    name_low = entry.name.lower()
+                    if entry.name.startswith('.'):
+                        continue
+                    if name_low in skip_set:
+                        continue
+                    folders.append({"name": entry.name, "path": str(entry.path), "type": "folder"})
         except PermissionError:
             raise HTTPException(status_code=403, detail="폴더 접근 권한이 없습니다")
 
